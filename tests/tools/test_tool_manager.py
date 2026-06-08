@@ -803,6 +803,35 @@ class TestToolManagerServerInfo:
 
         assert result == []
 
+    async def test_get_prompt_no_stream_manager(self):
+        """get_prompt returns {} when there is no stream manager."""
+        tm = ToolManager(config_file="test.json", servers=[])
+        tm.stream_manager = None
+
+        assert await tm.get_prompt("p") == {}
+
+    async def test_get_prompt_with_method(self):
+        """get_prompt awaits the stream manager and returns its dict result."""
+        tm = ToolManager(config_file="test.json", servers=[])
+        mock_sm = MagicMock()
+        payload = {"messages": [{"role": "user", "content": {"text": "hi"}}]}
+        mock_sm.get_prompt = AsyncMock(return_value=payload)
+        tm.stream_manager = mock_sm
+
+        result = await tm.get_prompt("greet", {"who": "world"})
+
+        assert result == payload
+        mock_sm.get_prompt.assert_awaited_once_with("greet", {"who": "world"}, None)
+
+    async def test_get_prompt_exception(self):
+        """get_prompt swallows stream-manager errors and returns {}."""
+        tm = ToolManager(config_file="test.json", servers=[])
+        mock_sm = MagicMock()
+        mock_sm.get_prompt = AsyncMock(side_effect=RuntimeError("error"))
+        tm.stream_manager = mock_sm
+
+        assert await tm.get_prompt("p") == {}
+
 
 class TestToolManagerGetAllToolsErrors:
     """Test get_all_tools error handling."""

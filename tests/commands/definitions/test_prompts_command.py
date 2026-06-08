@@ -114,3 +114,44 @@ class TestPromptsCommand:
 
                 assert result.success is False
                 assert "Server error" in result.error
+
+    @pytest.mark.asyncio
+    async def test_execute_get_renders_messages(self, command):
+        """--get <name> fetches a prompt and renders its messages."""
+        from unittest.mock import AsyncMock
+
+        with patch("mcp_cli.context.get_context") as mock_get_ctx:
+            mock_ctx = mock_get_ctx.return_value
+            mock_ctx.tool_manager.get_prompt = AsyncMock(
+                return_value={
+                    "description": "Greeter",
+                    "messages": [
+                        {"role": "user", "content": {"type": "text", "text": "Hello"}}
+                    ],
+                }
+            )
+            # list_prompts must NOT be consulted in get mode
+            mock_ctx.tool_manager.list_prompts = AsyncMock(
+                side_effect=AssertionError(
+                    "list_prompts should not be called in get mode"
+                )
+            )
+            result = await command.execute(get="greet")
+
+        assert result.success is True
+        assert "Greeter" in result.output
+        assert "[user] Hello" in result.output
+        mock_ctx.tool_manager.get_prompt.assert_awaited_once_with("greet")
+
+    @pytest.mark.asyncio
+    async def test_execute_get_not_found(self, command):
+        """--get on a missing/empty prompt is a failure, not a crash."""
+        from unittest.mock import AsyncMock
+
+        with patch("mcp_cli.context.get_context") as mock_get_ctx:
+            mock_ctx = mock_get_ctx.return_value
+            mock_ctx.tool_manager.get_prompt = AsyncMock(return_value={})
+            result = await command.execute(get="nope")
+
+        assert result.success is False
+        assert "nope" in result.error

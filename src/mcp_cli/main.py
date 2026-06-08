@@ -1248,12 +1248,17 @@ direct_registered.append("resources")
 
 
 # Prompts command
-@app.command("prompts", help="List available prompts")
+@app.command("prompts", help="List prompts, or fetch one with --get <name>")
 def prompts_command(
     config_file: str = typer.Option(
         "server_config.json", help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
+    get: str | None = typer.Option(
+        None,
+        "--get",
+        help="Fetch and print a specific prompt by name",
+    ),
     provider: str = typer.Option("openai", help="LLM provider name"),
     model: str | None = typer.Option(None, help="Model name"),
     disable_filesystem: bool = typer.Option(False, help="Disable filesystem access"),
@@ -1264,7 +1269,7 @@ def prompts_command(
     log_level: str = typer.Option("WARNING", "--log-level", help="Set log level"),
     theme: str = typer.Option("default", "--theme", help="UI theme"),
 ) -> None:
-    """Show all prompt templates."""
+    """Show all prompt templates, or fetch one with --get <name>."""
     # Configure logging and theme for this command
     _setup_command_logging(quiet, verbose, log_level, theme)
 
@@ -1276,7 +1281,7 @@ def prompts_command(
     from mcp_cli.adapters.cli import cli_execute
 
     async def _prompts_wrapper(**params):
-        return await cli_execute("prompts")
+        return await cli_execute("prompts", get=get)
 
     run_command_sync(
         _prompts_wrapper,

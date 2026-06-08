@@ -1304,6 +1304,39 @@ class ToolManager:
             logger.error("Error reading resource %s from %s: %s", uri, server_name, e)
             return {}
 
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        server_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Get a prompt by name.
+
+        Args:
+            name: Prompt name to fetch.
+            arguments: Optional arguments used to render the prompt template.
+            server_name: Optional server name to target.
+
+        Returns:
+            Prompt content dict from the server.
+        """
+        if not self.stream_manager:
+            logger.debug("get_prompt: no stream_manager available")
+            return {}
+
+        try:
+            result: dict[str, Any] = await self.stream_manager.get_prompt(
+                name, arguments, server_name
+            )
+            if not result:
+                logger.debug(
+                    "get_prompt returned empty for %s (server=%s)", name, server_name
+                )
+            return result
+        except Exception as e:
+            logger.error("Error getting prompt %s from %s: %s", name, server_name, e)
+            return {}
+
     async def list_prompts(self) -> list[PromptInfo]:
         """List available prompts from servers as PromptInfo objects."""
         if not self.stream_manager:
