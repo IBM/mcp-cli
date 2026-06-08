@@ -468,8 +468,15 @@ class ResourceInfo(BaseModel):
         in ``extra["value"]`` so it is never lost.
         """
         if isinstance(raw, dict):
-            known = {k: raw.get(k) for k in ("id", "name", "type")}
-            extra = {k: v for k, v in raw.items() if k not in known}
+            # MCP resources are keyed by ``uri`` and typed by ``mimeType``; map
+            # those onto the canonical id/type fields so the UI doesn't need to
+            # know the wire shape. The original keys are still kept in ``extra``.
+            known = {
+                "id": raw.get("id") or raw.get("uri"),
+                "name": raw.get("name"),
+                "type": raw.get("type") or raw.get("mimeType"),
+            }
+            extra = {k: v for k, v in raw.items() if k not in ("id", "name", "type")}
             return cls(**known, extra=extra)
         # primitive - wrap it
         return cls(extra={"value": raw})

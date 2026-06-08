@@ -725,7 +725,10 @@ class TestToolManagerServerInfo:
 
         assert all(isinstance(r, ResourceInfo) for r in result)
         assert result[0].name == "a.txt"
-        # No top-level id/type keys in the raw dict, so they are preserved in extra.
+        # uri -> id and mimeType -> type are normalized onto the canonical fields,
+        # while the original keys remain available in extra.
+        assert result[0].id == "file:///a.txt"
+        assert result[0].type == "text/plain"
         assert result[0].extra["uri"] == "file:///a.txt"
         assert result[0].extra["mimeType"] == "text/plain"
 

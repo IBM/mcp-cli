@@ -24,6 +24,7 @@ class TestResourcesCommand:
         assert "server" in params
         assert "raw" in params
         assert "uri" in params
+        assert "read" in params
 
     @pytest.mark.asyncio
     async def test_execute_list_all(self, command):
@@ -126,3 +127,42 @@ class TestResourcesCommand:
 
                 assert result.success is False
                 assert "Server not connected" in result.error
+
+    @pytest.mark.asyncio
+    async def test_execute_read_returns_contents(self, command):
+        """--read <uri> prints the resource's text contents."""
+        with patch("mcp_cli.context.get_context") as mock_get_ctx:
+            mock_ctx = mock_get_ctx.return_value
+            mock_ctx.tool_manager.read_resource = AsyncMock(
+                return_value={
+                    "contents": [
+                        {
+                            "uri": "debug://mail_log",
+                            "mimeType": "text/plain",
+                            "text": "line1\nline2",
+                        }
+                    ]
+                }
+            )
+            # list_resources must NOT be consulted in read mode
+            mock_ctx.tool_manager.list_resources = AsyncMock(
+                side_effect=AssertionError(
+                    "list_resources should not be called in read mode"
+                )
+            )
+            result = await command.execute(read="debug://mail_log")
+
+        assert result.success is True
+        assert result.output == "line1\nline2"
+        mock_ctx.tool_manager.read_resource.assert_awaited_once_with("debug://mail_log")
+
+    @pytest.mark.asyncio
+    async def test_execute_read_not_found(self, command):
+        """--read on a missing/empty resource is a failure, not a crash."""
+        with patch("mcp_cli.context.get_context") as mock_get_ctx:
+            mock_ctx = mock_get_ctx.return_value
+            mock_ctx.tool_manager.read_resource = AsyncMock(return_value={})
+            result = await command.execute(read="debug://nope")
+
+        assert result.success is False
+        assert "debug://nope" in result.error
