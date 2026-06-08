@@ -475,6 +475,49 @@ class ResourceInfo(BaseModel):
         return cls(extra={"value": raw})
 
 
+class PromptInfo(BaseModel):
+    """
+    Canonical representation of *one* prompt entry as returned by
+    ``prompts.list``.
+
+    Mirrors :class:`ResourceInfo`: the common fields used in the UI are
+    normalised and **all additional keys** are preserved inside ``extra``.
+    """
+
+    # Common attributes we frequently need in the UI
+    name: str | None = None
+    description: str | None = None
+    arguments: list[Any] = Field(default_factory=list)
+
+    # Anything else goes here …
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"frozen": False, "arbitrary_types_allowed": True}
+
+    # ------------------------------------------------------------------ #
+    # Factory helpers
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def from_raw(cls, raw: Any) -> "PromptInfo":
+        """
+        Convert a raw list item (dict | str | …) into a PromptInfo.
+
+        If *raw* is not a mapping we treat it as an opaque scalar and store it
+        in ``extra["value"]`` so it is never lost.
+        """
+        if isinstance(raw, dict):
+            known = ("name", "description", "arguments")
+            extra = {k: v for k, v in raw.items() if k not in known}
+            return cls(
+                name=raw.get("name"),
+                description=raw.get("description"),
+                arguments=raw.get("arguments") or [],
+                extra=extra,
+            )
+        # primitive - wrap it
+        return cls(extra={"value": raw})
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Transport and Server Configuration Models
 # ──────────────────────────────────────────────────────────────────────────────

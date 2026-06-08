@@ -44,6 +44,8 @@ from mcp_cli.tools.execution import (
 )
 from mcp_cli.tools.filter import DisabledReason, ToolFilter
 from mcp_cli.tools.models import (
+    PromptInfo,
+    ResourceInfo,
     ServerInfo,
     ToolCallResult,
     ToolDefinitionInput,
@@ -1258,15 +1260,17 @@ class ToolManager:
             logger.error(f"Error getting streams: {e}")
             return []
 
-    def list_resources(self):
-        """List available resources from servers."""
+    async def list_resources(self) -> list[ResourceInfo]:
+        """List available resources from servers as ResourceInfo objects."""
         if not self.stream_manager:
             return []
 
         try:
-            if hasattr(self.stream_manager, "list_resources"):
-                return self.stream_manager.list_resources()
-            return []
+            if not hasattr(self.stream_manager, "list_resources"):
+                return []
+            # StreamManager.list_resources() is async and returns list[dict].
+            raw = await self.stream_manager.list_resources()
+            return [ResourceInfo.from_raw(item) for item in (raw or [])]
         except Exception as e:
             logger.error(f"Error listing resources: {e}")
             return []
@@ -1300,15 +1304,17 @@ class ToolManager:
             logger.error("Error reading resource %s from %s: %s", uri, server_name, e)
             return {}
 
-    def list_prompts(self):
-        """List available prompts from servers."""
+    async def list_prompts(self) -> list[PromptInfo]:
+        """List available prompts from servers as PromptInfo objects."""
         if not self.stream_manager:
             return []
 
         try:
-            if hasattr(self.stream_manager, "list_prompts"):
-                return self.stream_manager.list_prompts()
-            return []
+            if not hasattr(self.stream_manager, "list_prompts"):
+                return []
+            # StreamManager.list_prompts() is async and returns list[dict].
+            raw = await self.stream_manager.list_prompts()
+            return [PromptInfo.from_raw(item) for item in (raw or [])]
         except Exception as e:
             logger.error(f"Error listing prompts: {e}")
             return []
