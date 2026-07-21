@@ -6,6 +6,9 @@ on:
          - main
    pull_request:
 
+permissions:
+   contents: read
+
 jobs:
    lint-and-typecheck:
       runs-on: ubuntu-latest
@@ -101,7 +104,7 @@ jobs:
            run: uv sync --group dev
 
          - name: Run tests
-           run: uv run pytest --cov=src --cov-report= ${{ matrix.test-path }}
+           run: uv run pytest --cov=src --cov-report= --cov-fail-under=0 ${{ matrix.test-path }}
 
          - name: Rename coverage file
            run: mv .coverage ".coverage.${{ strategy.job-index }}"
