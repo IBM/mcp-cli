@@ -933,7 +933,7 @@ def _resolve_string(value: str, variables: dict[str, Any]) -> Any:
         return resolved if resolved is not None else value
 
     # Template string: "text ${var} more" → string interpolation
-    def replacer(match: re.Match) -> str:
+    def replacer(match: re.Match[str]) -> str:
         var_path = match.group(1)
         resolved = _resolve_path(var_path, variables)
         return str(resolved) if resolved is not None else match.group(0)

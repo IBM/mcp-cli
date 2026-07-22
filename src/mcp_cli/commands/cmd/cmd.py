@@ -392,7 +392,7 @@ Usage:
                 messages=messages,
                 max_tokens=4096,
             )
-            return final_response.get("response", response_text)
+            return str(final_response.get("response", response_text))
         except Exception:
             return response_text
 

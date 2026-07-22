@@ -161,7 +161,8 @@ class ConversationProcessor:
             max_turns: Maximum number of conversation turns before forcing exit (default: 100)
         """
         turn_count = 0
-        last_tool_signature = None  # Track last tool call to detect true duplicates
+        # Track last tool call to detect true duplicates
+        last_tool_signature: str | None = None
         tools_for_completion = None  # Will be set based on context
         after_tool_calls = False  # True when resuming after tool execution
 
