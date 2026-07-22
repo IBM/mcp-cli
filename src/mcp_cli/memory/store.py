@@ -13,6 +13,7 @@ from pathlib import Path
 from mcp_cli.config.defaults import (
     DEFAULT_MEMORY_BASE_DIR,
     DEFAULT_MEMORY_MAX_ENTRIES_PER_SCOPE,
+    DEFAULT_MEMORY_MAX_ENTRY_CHARS,
     DEFAULT_MEMORY_MAX_PROMPT_CHARS,
 )
 from mcp_cli.memory.models import MemoryEntry, MemoryScope, MemoryScopeFile
@@ -29,6 +30,7 @@ class MemoryScopeStore:
         workspace_dir: str | None = None,
         max_entries: int = DEFAULT_MEMORY_MAX_ENTRIES_PER_SCOPE,
         max_prompt_chars: int = DEFAULT_MEMORY_MAX_PROMPT_CHARS,
+        max_entry_chars: int = DEFAULT_MEMORY_MAX_ENTRY_CHARS,
     ) -> None:
         self._base_dir = Path(base_dir or DEFAULT_MEMORY_BASE_DIR).expanduser()
         self._workspace_hash = hashlib.sha256(
@@ -36,6 +38,7 @@ class MemoryScopeStore:
         ).hexdigest()[:16]
         self._max_entries = max_entries
         self._max_prompt_chars = max_prompt_chars
+        self._max_entry_chars = max_entry_chars
         self._lock = threading.Lock()
 
         # Ensure directories exist
@@ -48,6 +51,9 @@ class MemoryScopeStore:
 
     def remember(self, scope: MemoryScope, key: str, content: str) -> MemoryEntry:
         """Store or update a memory entry (upsert by key)."""
+        if len(content) > self._max_entry_chars:
+            content = content[: self._max_entry_chars]
+
         with self._lock:
             data = self._load(scope)
             now = datetime.now(timezone.utc)

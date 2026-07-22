@@ -9,7 +9,7 @@ import {
   setPanels, incPanelCounter, setLayoutConfig,
   isSidebarView, _sidebarOpen,
 } from './state.js';
-import { makeDraggable, showToast } from './utils.js';
+import { esc, makeDraggable, showToast } from './utils.js';
 import {
   getOrCreateView, attachViewToSlot, iconForView, labelForView, srcForView,
   updatePanelHeader, switchPanelView, populateViewMenu, postToIframe,
@@ -90,8 +90,8 @@ export function createPanelSlot(viewId, rowEl) {
   header.className = 'panel-header';
   header.draggable = true;
   header.innerHTML = `
-    <span class="panel-icon">${iconForView(resolvedViewId)}</span>
-    <button class="panel-view-toggle" title="Switch view">${labelForView(resolvedViewId)} ▾</button>
+    <span class="panel-icon">${esc(iconForView(resolvedViewId))}</span>
+    <button class="panel-view-toggle" title="Switch view">${esc(labelForView(resolvedViewId))} ▾</button>
     <div class="panel-view-menu dropdown-menu"></div>
     <button class="panel-btn" title="Pop out" data-action="popout">⤢</button>
     <button class="panel-btn" title="Minimize" data-action="minimize">−</button>

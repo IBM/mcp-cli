@@ -17,6 +17,7 @@ import json
 import logging
 from typing import Any
 
+from mcp_cli.planning.backends import ConfirmPromptCallback
 from mcp_cli.planning.context import PlanningContext
 
 logger = logging.getLogger(__name__)
@@ -302,12 +303,25 @@ async def _run_plan(
             except Exception:
                 pass
 
+    confirm_prompt: ConfirmPromptCallback | None = None
+    if ui_manager is not None and hasattr(ui_manager, "do_confirm_tool_execution"):
+
+        async def _confirm_prompt(tool_name: str, arguments: dict) -> bool:
+            return bool(
+                await ui_manager.do_confirm_tool_execution(
+                    tool_name=tool_name, arguments=arguments
+                )
+            )
+
+        confirm_prompt = _confirm_prompt
+
     runner = PlanRunner(
         context,
         model_manager=model_manager,
         enable_guards=False,
         on_tool_start=on_tool_start,
         on_tool_complete=on_tool_complete,
+        confirm_prompt=confirm_prompt,
     )
 
     result = await runner.execute_plan(plan_data, checkpoint=False)

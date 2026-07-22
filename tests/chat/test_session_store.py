@@ -178,6 +178,22 @@ class TestAgentNamespacing:
         assert store.sessions_dir == tmp_path / "my-agent"
         assert store.sessions_dir.exists()
 
+    def test_agent_id_path_traversal_sanitized(self, tmp_path):
+        """A malicious agent_id (e.g. via agent_spawn's LLM-controlled name)
+        cannot escape sessions_dir via path traversal."""
+        malicious_id = "../../../../tmp/evil-agent"
+        store = SessionStore(sessions_dir=tmp_path, agent_id=malicious_id)
+
+        # Must stay inside tmp_path, not escape to /tmp/evil-agent or similar
+        assert store.sessions_dir.parent == tmp_path
+        assert ".." not in store.sessions_dir.name
+        assert "/" not in store.sessions_dir.name
+
+    def test_agent_id_with_slashes_sanitized(self, tmp_path):
+        malicious_id = "evil/../../agent"
+        store = SessionStore(sessions_dir=tmp_path, agent_id=malicious_id)
+        assert store.sessions_dir.parent == tmp_path
+
 
 class TestAutoSave:
     def test_auto_save_triggers(self):

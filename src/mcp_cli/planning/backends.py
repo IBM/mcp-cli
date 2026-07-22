@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from chuk_ai_planner.execution.models import (
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+ConfirmPromptCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
+"""Async callback that asks the user to approve a tool call: (tool_name, arguments) -> approved."""
+
 
 class McpToolBackend:
     """Planner → mcp-cli ToolManager adapter with guard integration.
@@ -44,6 +48,14 @@ class McpToolBackend:
     Guard checks (budget, per-tool limits, runaway detection) are
     enforced before each call. Results are recorded for value binding
     and budget tracking after each call.
+
+    Tool confirmation: the normal chat path gates every tool call through
+    the user's confirm-tools preference and trusted-domain list before
+    executing it. This backend enforces the exact same policy — a plan is
+    just another way a tool call gets made, and it must not bypass a
+    control the user already turned on. If the preference says a call
+    needs confirmation but no confirm_prompt was supplied to actually ask
+    the user, the call is declined rather than silently allowed through.
     """
 
     def __init__(
@@ -52,6 +64,7 @@ class McpToolBackend:
         *,
         namespace: str | None = None,
         enable_guards: bool = True,
+        confirm_prompt: ConfirmPromptCallback | None = None,
     ) -> None:
         """Initialize the MCP tool backend.
 
@@ -59,10 +72,38 @@ class McpToolBackend:
             tool_manager: The ToolManager instance for MCP tool execution.
             namespace: Optional namespace prefix for tool names.
             enable_guards: If True, check guards before each tool call.
+            confirm_prompt: Async (tool_name, arguments) -> bool callback that
+                prompts the user for approval, e.g. ui_manager's
+                do_confirm_tool_execution. When the confirm-tools preference
+                requires confirmation for a tool and this is None, the call
+                is declined (fail closed) rather than executed unconfirmed.
         """
         self._tool_manager = tool_manager
         self._namespace = namespace
         self._enable_guards = enable_guards
+        self._confirm_prompt = confirm_prompt
+
+    async def _should_confirm(self, tool_name: str) -> bool:
+        """Mirror chat/tool_processor.py's _should_confirm_tool policy check."""
+        try:
+            from mcp_cli.utils.preferences import get_preference_manager
+
+            prefs = get_preference_manager()
+
+            server_url: str | None = None
+            try:
+                info = await self._tool_manager.get_tool_by_name(tool_name)
+                if info is not None:
+                    server_url = self._tool_manager._get_server_url(info.namespace)
+            except Exception as e:
+                logger.debug("Could not resolve server URL for %s: %s", tool_name, e)
+
+            if server_url and prefs.is_trusted_domain(server_url):
+                return False
+            return bool(prefs.should_confirm_tool(tool_name))
+        except Exception as e:
+            logger.warning("Error checking tool confirmation preference: %s", e)
+            return True
 
     async def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
         """Execute a tool via mcp-cli's ToolManager with guard checks.
@@ -88,6 +129,41 @@ class McpToolBackend:
             tool_name,
             list(request.args.keys()),
         )
+
+        # --- Tool confirmation (same policy as the interactive chat path) ---
+        if await self._should_confirm(tool_name):
+            if self._confirm_prompt is None:
+                duration = time.perf_counter() - start_time
+                logger.warning(
+                    "Plan step %s: tool %s requires confirmation but no "
+                    "confirm_prompt was wired up — declining rather than "
+                    "executing unconfirmed",
+                    request.step_id,
+                    tool_name,
+                )
+                return ToolExecutionResult(
+                    tool_name=request.tool_name,
+                    result=None,
+                    error="Tool execution requires user confirmation, which "
+                    "isn't available in this context",
+                    duration=duration,
+                    cached=False,
+                )
+            approved = await self._confirm_prompt(tool_name, request.args)
+            if not approved:
+                duration = time.perf_counter() - start_time
+                logger.info(
+                    "Plan step %s: tool %s declined by user",
+                    request.step_id,
+                    tool_name,
+                )
+                return ToolExecutionResult(
+                    tool_name=request.tool_name,
+                    result=None,
+                    error="Tool execution declined by user",
+                    duration=duration,
+                    cached=False,
+                )
 
         # --- Guard checks (pre-execution) ---
         if self._enable_guards:

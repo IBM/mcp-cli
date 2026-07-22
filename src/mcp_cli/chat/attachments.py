@@ -267,6 +267,16 @@ def process_browser_file(
     ValueError
         If the file is too large or has an unsupported extension.
     """
+    # Reject grossly oversized payloads from the encoded length alone,
+    # before decoding the whole thing into memory (base64 inflates size by
+    # ~4/3, so this is a cheap upper-bound check ahead of the exact one
+    # below).
+    if len(data_b64) * 3 // 4 > DEFAULT_MAX_ATTACHMENT_SIZE_BYTES:
+        raise ValueError(
+            f"File too large: ~{len(data_b64) * 3 // 4:,} bytes "
+            f"(max {DEFAULT_MAX_ATTACHMENT_SIZE_BYTES:,})"
+        )
+
     raw = base64.b64decode(data_b64)
     size = len(raw)
     if size > DEFAULT_MAX_ATTACHMENT_SIZE_BYTES:

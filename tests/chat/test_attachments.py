@@ -521,6 +521,34 @@ class TestProcessBrowserFile:
         with pytest.raises(ValueError, match="too large"):
             process_browser_file("big.bin", b64, "image/png")
 
+    def test_too_large_rejected_before_decoding(self, monkeypatch):
+        """A grossly oversized payload is rejected via the encoded-length
+        estimate, without ever calling base64.b64decode (DoS hardening —
+        this path is reachable from an unauthenticated dashboard WebSocket
+        client before Origin validation, or from a malicious/compromised
+        one after)."""
+        import base64
+
+        raw = b"\x00" * (DEFAULT_MAX_ATTACHMENT_SIZE_BYTES * 2)
+        b64 = base64.b64encode(raw).decode()
+
+        called = False
+        real_b64decode = base64.b64decode
+
+        def _tracking_b64decode(*args, **kwargs):
+            nonlocal called
+            called = True
+            return real_b64decode(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "mcp_cli.chat.attachments.base64.b64decode", _tracking_b64decode
+        )
+
+        with pytest.raises(ValueError, match="too large"):
+            process_browser_file("big.bin", b64, "image/png")
+
+        assert called is False
+
     def test_unsupported_extension(self):
         import base64
 

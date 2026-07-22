@@ -27,6 +27,20 @@ from mcp_cli.planning.executor import (
     _parse_tool_call_entry,
 )
 from mcp_cli.planning.context import PlanningContext
+from mcp_cli.planning.backends import McpToolBackend
+
+
+@pytest.fixture(autouse=True)
+def _bypass_confirmation(monkeypatch):
+    """These tests exercise plan execution mechanics (batching, retries,
+    checkpoints, variable resolution), not the tool-confirmation gate —
+    see tests/planning/test_backends.py::TestToolConfirmation for that.
+    """
+
+    async def _never_confirm(self, tool_name):
+        return False
+
+    monkeypatch.setattr(McpToolBackend, "_should_confirm", _never_confirm)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

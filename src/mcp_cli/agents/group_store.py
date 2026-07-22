@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mcp_cli.chat.session_store import _sanitize_path_component
+
 if TYPE_CHECKING:
     from mcp_cli.agents.manager import AgentManager
 
@@ -69,9 +71,11 @@ async def save_group(
             }
         )
 
-        # Save session if available
+        # Save session if available. agent_id can originate from an
+        # LLM-controllable agent_spawn tool call, so sanitize it before
+        # using it as a path component.
         ctx = snapshot["context"]
-        agent_dir = base / agent_id
+        agent_dir = base / _sanitize_path_component(agent_id)
         agent_dir.mkdir(parents=True, exist_ok=True)
         try:
             history = getattr(ctx, "conversation_history", [])

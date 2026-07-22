@@ -39,6 +39,7 @@ from mcp_cli.config.defaults import (
     DEFAULT_HTTP_REQUEST_TIMEOUT,
 )
 from mcp_cli.utils.loopback_origin import is_allowed_origin as _is_allowed_origin
+from mcp_cli.utils.url_safety import is_safe_fetch_url
 
 if TYPE_CHECKING:
     from mcp_cli.tools.manager import ToolManager
@@ -441,28 +442,51 @@ class AppHostServer:
             f"Could not find available port after {max_attempts} attempts"
         )
 
+    _MAX_REDIRECTS = 5
+
     @staticmethod
     async def _fetch_http_resource(url: str) -> tuple[str, dict[str, Any]]:
-        """Fetch HTML content directly from an HTTP/HTTPS URL."""
+        """Fetch HTML content directly from an HTTP/HTTPS URL.
+
+        *url* comes from the connected MCP server (resource_uri or a tool
+        result's viewUrl), so it's validated against is_safe_fetch_url()
+        before every request — including each redirect hop, since a
+        same-origin-looking URL could redirect to an internal address.
+        """
         import httpx
 
+        current_url = url
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=DEFAULT_HTTP_REQUEST_TIMEOUT
+            follow_redirects=False, timeout=DEFAULT_HTTP_REQUEST_TIMEOUT
         ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            html = resp.text
-            # Wrap in a resource-like structure for CSP/permissions extraction
-            resource = {
-                "contents": [
-                    {
-                        "uri": url,
-                        "mimeType": resp.headers.get("content-type", "text/html"),
-                        "text": html,
-                    }
-                ]
-            }
-            return html, resource
+            for _ in range(AppHostServer._MAX_REDIRECTS + 1):
+                if not is_safe_fetch_url(current_url):
+                    raise RuntimeError(
+                        f"Refusing to fetch disallowed URL: {current_url}"
+                    )
+                resp = await client.get(current_url)
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        resp.raise_for_status()
+                        break
+                    current_url = str(resp.url.join(location))
+                    continue
+                resp.raise_for_status()
+                html = resp.text
+                # Wrap in a resource-like structure for CSP/permissions extraction
+                resource = {
+                    "contents": [
+                        {
+                            "uri": current_url,
+                            "mimeType": resp.headers.get("content-type", "text/html"),
+                            "text": html,
+                        }
+                    ]
+                }
+                return html, resource
+
+        raise RuntimeError(f"Too many redirects fetching {url}")
 
     @staticmethod
     def _extract_html(resource: dict[str, Any]) -> str:

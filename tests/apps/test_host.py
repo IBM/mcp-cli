@@ -404,6 +404,7 @@ class TestFetchHttpResource:
         fake_response = MagicMock()
         fake_response.text = "<html>fetched</html>"
         fake_response.headers = {"content-type": "text/html"}
+        fake_response.is_redirect = False
         fake_response.raise_for_status = MagicMock()
 
         fake_client = MagicMock()
@@ -411,7 +412,10 @@ class TestFetchHttpResource:
         fake_client.__aenter__ = AsyncMock(return_value=fake_client)
         fake_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=fake_client):
+        with (
+            patch("httpx.AsyncClient", return_value=fake_client),
+            patch("mcp_cli.apps.host.is_safe_fetch_url", return_value=True),
+        ):
             html, resource = await AppHostServer._fetch_http_resource(
                 "https://example.com/app.html"
             )
@@ -428,6 +432,7 @@ class TestFetchHttpResource:
         import httpx
 
         fake_response = MagicMock()
+        fake_response.is_redirect = False
         fake_response.raise_for_status = MagicMock(
             side_effect=httpx.HTTPStatusError(
                 "404", request=MagicMock(), response=MagicMock()
@@ -439,9 +444,82 @@ class TestFetchHttpResource:
         fake_client.__aenter__ = AsyncMock(return_value=fake_client)
         fake_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=fake_client):
+        with (
+            patch("httpx.AsyncClient", return_value=fake_client),
+            patch("mcp_cli.apps.host.is_safe_fetch_url", return_value=True),
+        ):
             with pytest.raises(httpx.HTTPStatusError):
                 await AppHostServer._fetch_http_resource("https://example.com/missing")
+
+    @pytest.mark.asyncio
+    async def test_rejects_disallowed_url_before_fetching(self):
+        """A URL that fails is_safe_fetch_url is never sent to httpx."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock()
+        fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+        fake_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("httpx.AsyncClient", return_value=fake_client),
+            patch("mcp_cli.apps.host.is_safe_fetch_url", return_value=False),
+        ):
+            with pytest.raises(RuntimeError, match="disallowed URL"):
+                await AppHostServer._fetch_http_resource(
+                    "http://169.254.169.254/latest/meta-data/"
+                )
+
+        fake_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_disallowed_target_is_rejected(self):
+        """A redirect hop pointing at a disallowed URL is rejected, not followed."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        import httpx
+
+        redirect_response = MagicMock()
+        redirect_response.is_redirect = True
+        redirect_response.headers = {"location": "http://169.254.169.254/secret"}
+        redirect_response.url = httpx.URL("https://example.com/app.html")
+
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=redirect_response)
+        fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+        fake_client.__aexit__ = AsyncMock(return_value=False)
+
+        def _fake_is_safe(url):
+            return "169.254.169.254" not in url
+
+        with (
+            patch("httpx.AsyncClient", return_value=fake_client),
+            patch("mcp_cli.apps.host.is_safe_fetch_url", side_effect=_fake_is_safe),
+        ):
+            with pytest.raises(RuntimeError, match="disallowed URL"):
+                await AppHostServer._fetch_http_resource("https://example.com/app.html")
+
+    @pytest.mark.asyncio
+    async def test_too_many_redirects_raises(self):
+        """A redirect chain longer than _MAX_REDIRECTS raises."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        import httpx
+
+        redirect_response = MagicMock()
+        redirect_response.is_redirect = True
+        redirect_response.headers = {"location": "/next"}
+        redirect_response.url = httpx.URL("https://example.com/app.html")
+
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=redirect_response)
+        fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+        fake_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("httpx.AsyncClient", return_value=fake_client),
+            patch("mcp_cli.apps.host.is_safe_fetch_url", return_value=True),
+        ):
+            with pytest.raises(RuntimeError, match="Too many redirects"):
+                await AppHostServer._fetch_http_resource("https://example.com/app.html")
 
 
 # ── ExtractHtml (additional edge cases) ────────────────────────────────────

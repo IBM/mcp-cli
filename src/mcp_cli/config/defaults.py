@@ -367,6 +367,10 @@ DEFAULT_MEMORY_MAX_ENTRIES_PER_SCOPE = 100
 DEFAULT_MEMORY_MAX_PROMPT_CHARS = 2000
 """Maximum characters for memory section in system prompt."""
 
+DEFAULT_MEMORY_MAX_ENTRY_CHARS = 10_000
+"""Maximum characters for a single memory entry's content, to bound
+on-disk growth from repeated remember() calls with large payloads."""
+
 
 # ================================================================
 # Planning Defaults (Tier 6)

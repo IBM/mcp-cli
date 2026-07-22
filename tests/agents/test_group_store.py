@@ -79,6 +79,24 @@ class TestSaveGroup:
         assert (tmp_path / "b" / "session.json").exists()
 
     @pytest.mark.asyncio
+    async def test_malicious_agent_id_cannot_escape_group_dir(self, tmp_path):
+        """agent_id can originate from an LLM-controllable agent_spawn call
+        (e.g. name="../../../../tmp/evil"); it must not escape group_dir."""
+        cfg = AgentConfig(
+            agent_id="../../../../tmp/evil-agent", name="Evil", role="worker"
+        )
+        mgr = _make_agent_manager(cfg)
+
+        await save_group(mgr, description="attack", group_dir=tmp_path)
+
+        # No session.json should exist outside tmp_path
+        escaped_path = tmp_path.parent.parent.parent.parent / "tmp" / "evil-agent"
+        assert not escaped_path.exists()
+        # The sanitized directory should exist inside tmp_path instead
+        children = list(tmp_path.iterdir())
+        assert all(".." not in c.name and "/" not in c.name for c in children)
+
+    @pytest.mark.asyncio
     async def test_save_preserves_config_fields(self, tmp_path):
         cfg = AgentConfig(
             agent_id="x",

@@ -41,6 +41,21 @@ class TestRemember:
         assert len(gl) == 1
         assert gl[0].content == "global_val"
 
+    def test_content_over_max_chars_is_truncated(self, tmp_path: Path):
+        """A single remember() call can't grow a scope file unboundedly."""
+        store = MemoryScopeStore(
+            base_dir=tmp_path, workspace_dir="/test/project", max_entry_chars=100
+        )
+        entry = store.remember(MemoryScope.GLOBAL, "huge", "x" * 10_000)
+        assert len(entry.content) == 100
+
+    def test_content_under_max_chars_is_unaffected(self, tmp_path: Path):
+        store = MemoryScopeStore(
+            base_dir=tmp_path, workspace_dir="/test/project", max_entry_chars=100
+        )
+        entry = store.remember(MemoryScope.GLOBAL, "small", "hello")
+        assert entry.content == "hello"
+
 
 class TestRecall:
     def test_all(self, store: MemoryScopeStore):

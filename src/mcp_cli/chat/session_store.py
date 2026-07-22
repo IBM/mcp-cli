@@ -18,6 +18,16 @@ from mcp_cli.config.defaults import DEFAULT_AGENT_ID, DEFAULT_SESSIONS_DIR
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_path_component(value: str) -> str:
+    """Strip path separators and '..' so *value* can't escape its parent dir.
+
+    Used for any identifier (session_id, agent_id) that ends up as a path
+    component but may originate from LLM-controllable input (e.g. an
+    agent_spawn tool call), not just direct user input.
+    """
+    return value.replace("/", "_").replace("\\", "_").replace("..", "_")
+
+
 class SessionMetadata(BaseModel):
     """Metadata for a saved session."""
 
@@ -57,16 +67,18 @@ class SessionStore:
         if sessions_dir is None:
             sessions_dir = Path(DEFAULT_SESSIONS_DIR).expanduser()
         self.agent_id = agent_id
-        # Agent-namespaced subdirectory
-        self.sessions_dir = sessions_dir / agent_id
+        # Agent-namespaced subdirectory — sanitized since agent_id can
+        # originate from an LLM-controllable agent_spawn tool call, not
+        # just direct user input.
+        safe_agent_id = _sanitize_path_component(agent_id)
+        self.sessions_dir = sessions_dir / safe_agent_id
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         # Keep reference to root for backward-compat migration
         self._root_dir = sessions_dir
 
     def _session_path(self, session_id: str) -> Path:
         """Get the file path for a session."""
-        # Sanitize session_id to prevent path traversal
-        safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        safe_id = _sanitize_path_component(session_id)
         return self.sessions_dir / f"{safe_id}.json"
 
     def save(self, data: SessionData) -> Path:
@@ -120,7 +132,7 @@ class SessionStore:
 
         Returns the new path if migration succeeded, None otherwise.
         """
-        safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        safe_id = _sanitize_path_component(session_id)
         legacy_path = self._root_dir / f"{safe_id}.json"
         if not legacy_path.exists() or not legacy_path.is_file():
             return None

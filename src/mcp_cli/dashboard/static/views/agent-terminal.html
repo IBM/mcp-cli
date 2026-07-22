@@ -6,6 +6,8 @@
 <title>Agent Terminal</title>
 <!-- marked.js for markdown rendering -->
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<!-- DOMPurify to sanitize marked's HTML output before it's ever assigned to innerHTML -->
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <!-- highlight.js for syntax highlighting (common languages only) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
 <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
@@ -654,15 +656,19 @@ function addMessageBubble(role, content, streaming) {
 function renderBubbleContent(bubble, text, streaming) {
   const contentEl = bubble.querySelector('.msg-content');
   if (!contentEl) return;
-  if (typeof marked !== 'undefined' && !streaming) {
+  // Assistant text can be steered by anything an MCP server returns (prompt
+  // injection), so treat marked's HTML output as untrusted and run it
+  // through DOMPurify rather than a hand-rolled regex blocklist — a regex
+  // approach missed things like <svg/onload=...> (no leading whitespace
+  // before the attribute) and <iframe srcdoc="...">.
+  if (
+    typeof marked !== 'undefined' &&
+    typeof DOMPurify !== 'undefined' &&
+    !streaming
+  ) {
     try {
       const html = marked.parse(text);
-      // Sanitize: strip <script>, event handlers, and dangerous URIs
-      const sanitized = html
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/\son\w+\s*=/gi, ' data-removed=')
-        .replace(/href\s*=\s*["']javascript:/gi, 'href="');
-      contentEl.innerHTML = sanitized;
+      contentEl.innerHTML = DOMPurify.sanitize(html);
       return;
     } catch (e) {
       console.error('Markdown parse error:', e);

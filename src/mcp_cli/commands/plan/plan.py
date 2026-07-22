@@ -12,6 +12,7 @@ from mcp_cli.commands.base import (
     CommandResult,
 )
 from mcp_cli.config.enums import PlanAction
+from mcp_cli.planning.backends import ConfirmPromptCallback
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ Usage:
                     success=False,
                     error="Plan ID required. Usage: /plan resume <id>",
                 )
-            return await self._resume_plan(planning_context, remainder.strip())
+            return await self._resume_plan(planning_context, remainder.strip(), kwargs)
 
         else:
             return CommandResult(
@@ -301,6 +302,18 @@ Usage:
             if display:
                 await display.stop_tool_execution(result_text, success)
 
+        confirm_prompt: ConfirmPromptCallback | None = None
+        if ui_manager is not None and hasattr(ui_manager, "do_confirm_tool_execution"):
+
+            async def _confirm_prompt(tool_name: str, arguments: dict) -> bool:
+                return bool(
+                    await ui_manager.do_confirm_tool_execution(
+                        tool_name=tool_name, arguments=arguments
+                    )
+                )
+
+            confirm_prompt = _confirm_prompt
+
         # Get model_manager for LLM-driven execution
         model_manager = (kwargs or {}).get("model_manager")
 
@@ -311,6 +324,7 @@ Usage:
             on_step_complete=on_step_complete,
             on_tool_start=on_tool_start,
             on_tool_complete=on_tool_complete,
+            confirm_prompt=confirm_prompt,
         )
 
         result = await runner.execute_plan(plan_data, dry_run=dry_run)
@@ -347,7 +361,9 @@ Usage:
             error=f"Plan not found: {plan_id}",
         )
 
-    async def _resume_plan(self, context, plan_id: str) -> CommandResult:
+    async def _resume_plan(
+        self, context, plan_id: str, kwargs: dict | None = None
+    ) -> CommandResult:
         """Resume an interrupted plan."""
         from chuk_term.ui import output
         from mcp_cli.planning.executor import PlanRunner
@@ -359,7 +375,20 @@ Usage:
                 error=f"Plan not found: {plan_id}",
             )
 
-        runner = PlanRunner(context)
+        ui_manager = (kwargs or {}).get("ui_manager")
+        confirm_prompt: ConfirmPromptCallback | None = None
+        if ui_manager is not None and hasattr(ui_manager, "do_confirm_tool_execution"):
+
+            async def _confirm_prompt(tool_name: str, arguments: dict) -> bool:
+                return bool(
+                    await ui_manager.do_confirm_tool_execution(
+                        tool_name=tool_name, arguments=arguments
+                    )
+                )
+
+            confirm_prompt = _confirm_prompt
+
+        runner = PlanRunner(context, confirm_prompt=confirm_prompt)
         checkpoint = runner.load_checkpoint(plan_id)
 
         if not checkpoint:

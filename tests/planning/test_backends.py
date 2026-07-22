@@ -22,6 +22,26 @@ from mcp_cli.planning.backends import (
 )
 
 
+# Captured before the autouse fixture below ever patches the class, so tests
+# that want the real policy logic (TestToolConfirmation) can restore it.
+_REAL_SHOULD_CONFIRM = McpToolBackend._should_confirm
+
+
+@pytest.fixture(autouse=True)
+def _bypass_confirmation(monkeypatch):
+    """Most tests in this file exercise execution/guard mechanics, not the
+    confirmation gate itself — bypass it here so they don't need a real
+    PreferenceManager or a confirm_prompt wired up. Confirmation behavior
+    is covered explicitly by TestToolConfirmation below, which re-patches
+    _should_confirm per test as needed.
+    """
+
+    async def _never_confirm(self, tool_name):
+        return False
+
+    monkeypatch.setattr(McpToolBackend, "_should_confirm", _never_confirm)
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -725,3 +745,143 @@ class TestExtractErrorMessage:
         result = _extract_error_message(long_text)
         assert len(result) < 300
         assert result.endswith("...")
+
+
+# ── Tests: Tool Confirmation Gate ────────────────────────────────────────────
+
+
+class TestToolConfirmation:
+    """The planning backend must honor the same confirm-tools policy the
+    interactive chat path enforces — a plan is just another way a tool call
+    gets made, and must not silently bypass a control the user turned on.
+    """
+
+    @pytest.mark.asyncio
+    async def test_confirmed_call_executes(self, monkeypatch):
+        """When confirmation is required and the user approves, the tool runs."""
+
+        async def _always_confirm(self, tool_name):
+            return True
+
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _always_confirm)
+
+        approvals: list[tuple[str, dict]] = []
+
+        async def confirm_prompt(tool_name, args):
+            approvals.append((tool_name, args))
+            return True
+
+        tm = FakeToolManager(result="ok")
+        backend = McpToolBackend(tm, enable_guards=False, confirm_prompt=confirm_prompt)
+
+        request = ToolExecutionRequest(
+            tool_name="delete_file", args={"path": "/tmp/x"}, step_id="step-1"
+        )
+        result = await backend.execute_tool(request)
+
+        assert result.success
+        assert approvals == [("delete_file", {"path": "/tmp/x"})]
+        assert len(tm.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_declined_call_is_not_executed(self, monkeypatch):
+        """When the user declines, the tool must never reach ToolManager."""
+
+        async def _always_confirm(self, tool_name):
+            return True
+
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _always_confirm)
+
+        async def confirm_prompt(tool_name, args):
+            return False
+
+        tm = FakeToolManager(result="should not see this")
+        backend = McpToolBackend(tm, enable_guards=False, confirm_prompt=confirm_prompt)
+
+        request = ToolExecutionRequest(
+            tool_name="delete_file", args={"path": "/tmp/x"}, step_id="step-1"
+        )
+        result = await backend.execute_tool(request)
+
+        assert not result.success
+        assert "declined" in result.error.lower()
+        assert len(tm.calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_confirm_prompt_fails_closed(self, monkeypatch):
+        """If confirmation is required but nothing can ask the user, deny —
+        never silently execute unconfirmed."""
+
+        async def _always_confirm(self, tool_name):
+            return True
+
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _always_confirm)
+
+        tm = FakeToolManager(result="should not see this")
+        backend = McpToolBackend(tm, enable_guards=False, confirm_prompt=None)
+
+        request = ToolExecutionRequest(
+            tool_name="delete_file", args={"path": "/tmp/x"}, step_id="step-1"
+        )
+        result = await backend.execute_tool(request)
+
+        assert not result.success
+        assert "confirmation" in result.error.lower()
+        assert len(tm.calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_confirmation_required_executes_without_prompt(self, monkeypatch):
+        """Trusted/never-confirm tools execute even with no confirm_prompt wired."""
+
+        async def _never_confirm(self, tool_name):
+            return False
+
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _never_confirm)
+
+        tm = FakeToolManager(result="ok")
+        backend = McpToolBackend(tm, enable_guards=False, confirm_prompt=None)
+
+        request = ToolExecutionRequest(
+            tool_name="read_file", args={"path": "/tmp/x"}, step_id="step-1"
+        )
+        result = await backend.execute_tool(request)
+
+        assert result.success
+        assert len(tm.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_should_confirm_uses_preference_manager(self, monkeypatch):
+        """_should_confirm defers to get_preference_manager()'s policy."""
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _REAL_SHOULD_CONFIRM)
+        tm = FakeToolManager(result="ok")
+        backend = McpToolBackend(tm, enable_guards=False)
+
+        fake_prefs = MagicMock()
+        fake_prefs.is_trusted_domain.return_value = False
+        fake_prefs.should_confirm_tool.return_value = True
+
+        with patch(
+            "mcp_cli.utils.preferences.get_preference_manager",
+            return_value=fake_prefs,
+        ):
+            assert await backend._should_confirm("delete_file") is True
+
+        fake_prefs.should_confirm_tool.return_value = False
+        with patch(
+            "mcp_cli.utils.preferences.get_preference_manager",
+            return_value=fake_prefs,
+        ):
+            assert await backend._should_confirm("read_file") is False
+
+    @pytest.mark.asyncio
+    async def test_should_confirm_fails_closed_on_error(self, monkeypatch):
+        """Any error while checking preferences must default to requiring confirmation."""
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _REAL_SHOULD_CONFIRM)
+        tm = FakeToolManager(result="ok")
+        backend = McpToolBackend(tm, enable_guards=False)
+
+        with patch(
+            "mcp_cli.utils.preferences.get_preference_manager",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert await backend._should_confirm("delete_file") is True

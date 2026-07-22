@@ -34,7 +34,7 @@ from mcp_cli.config.defaults import (
     DEFAULT_PLAN_VARIABLE_SUMMARY_MAX_CHARS,
 )
 from mcp_cli.config.enums import PlanStatus
-from mcp_cli.planning.backends import McpToolBackend
+from mcp_cli.planning.backends import ConfirmPromptCallback, McpToolBackend
 from mcp_cli.planning.context import PlanningContext
 
 logger = logging.getLogger(__name__)
@@ -122,6 +122,7 @@ class PlanRunner:
         on_tool_start: ToolStartCallback | None = None,
         on_tool_complete: ToolCompleteCallback | None = None,
         enable_guards: bool = False,
+        confirm_prompt: ConfirmPromptCallback | None = None,
         max_concurrency: int = DEFAULT_PLAN_MAX_CONCURRENCY,
         max_step_retries: int = DEFAULT_PLAN_MAX_STEP_RETRIES,
     ) -> None:
@@ -139,6 +140,9 @@ class PlanRunner:
             on_tool_complete: Async callback(tool_name, result_str, success, elapsed)
                 after each tool call. Called for each agentic loop tool invocation.
             enable_guards: If True, enforce guard checks during execution.
+            confirm_prompt: Async (tool_name, arguments) -> bool callback used
+                to ask the user for approval before a tool call whose
+                confirm-tools preference requires it — see McpToolBackend.
             max_concurrency: Maximum concurrent steps within a batch.
             max_step_retries: Maximum LLM retry attempts per step on failure.
         """
@@ -155,6 +159,7 @@ class PlanRunner:
         self._backend = McpToolBackend(
             context.tool_manager,
             enable_guards=enable_guards,
+            confirm_prompt=confirm_prompt,
         )
 
         # Tool catalog cache (lazy-loaded, protected by lock for parallel steps)
