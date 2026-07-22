@@ -885,3 +885,59 @@ class TestToolConfirmation:
             side_effect=RuntimeError("boom"),
         ):
             assert await backend._should_confirm("delete_file") is True
+
+    @pytest.mark.asyncio
+    async def test_should_confirm_trusted_domain_bypasses(self, monkeypatch):
+        """A tool from a trusted-domain server skips confirmation, mirroring
+        the interactive chat path's is_trusted_domain fast path."""
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _REAL_SHOULD_CONFIRM)
+
+        class FakeToolInfo:
+            namespace = "trusted-server"
+
+        tm = FakeToolManager(result="ok")
+        tm.get_tool_by_name = lambda tool_name: _async_return(FakeToolInfo())
+        tm._get_server_url = lambda namespace: "https://trusted.example.com"
+        backend = McpToolBackend(tm, enable_guards=False)
+
+        fake_prefs = MagicMock()
+        fake_prefs.is_trusted_domain.return_value = True
+        fake_prefs.should_confirm_tool.return_value = True  # should never be reached
+
+        with patch(
+            "mcp_cli.utils.preferences.get_preference_manager",
+            return_value=fake_prefs,
+        ):
+            assert await backend._should_confirm("read_file") is False
+
+        fake_prefs.is_trusted_domain.assert_called_once_with(
+            "https://trusted.example.com"
+        )
+        fake_prefs.should_confirm_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_should_confirm_untrusted_domain_falls_through(self, monkeypatch):
+        """A resolvable but untrusted server URL still defers to should_confirm_tool."""
+        monkeypatch.setattr(McpToolBackend, "_should_confirm", _REAL_SHOULD_CONFIRM)
+
+        class FakeToolInfo:
+            namespace = "random-server"
+
+        tm = FakeToolManager(result="ok")
+        tm.get_tool_by_name = lambda tool_name: _async_return(FakeToolInfo())
+        tm._get_server_url = lambda namespace: "https://untrusted.example.com"
+        backend = McpToolBackend(tm, enable_guards=False)
+
+        fake_prefs = MagicMock()
+        fake_prefs.is_trusted_domain.return_value = False
+        fake_prefs.should_confirm_tool.return_value = True
+
+        with patch(
+            "mcp_cli.utils.preferences.get_preference_manager",
+            return_value=fake_prefs,
+        ):
+            assert await backend._should_confirm("delete_file") is True
+
+
+async def _async_return(value):
+    return value

@@ -1681,3 +1681,11 @@ class TestIsAllowedOrigin:
 
     def test_malformed_origin_rejected(self):
         assert _is_allowed_origin("not a url at all", 9470) is False
+
+    def test_non_numeric_port_rejected_without_raising(self):
+        # .port raises ValueError for non-numeric ports on some Python
+        # versions; must be caught, not propagated to the caller.
+        assert _is_allowed_origin("http://localhost:notaport", 9470) is False
+
+    def test_malformed_ipv6_origin_rejected_without_raising(self):
+        assert _is_allowed_origin("http://[invalid::ipv6", 9470) is False

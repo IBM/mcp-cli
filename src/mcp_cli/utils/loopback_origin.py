@@ -29,10 +29,15 @@ def is_allowed_origin(origin: str | None, port: int) -> bool:
         return False
     try:
         parsed = urlsplit(origin)
+        hostname = parsed.hostname
+        origin_port = parsed.port
     except ValueError:
+        # urlsplit()/.hostname/.port can each raise on malformed input
+        # (bad IPv6 literal, non-numeric port, ...) depending on the
+        # Python version, so all three are covered here.
         return False
     if parsed.scheme != "http":
         return False
-    if parsed.hostname not in _ALLOWED_ORIGIN_HOSTS:
+    if hostname not in _ALLOWED_ORIGIN_HOSTS:
         return False
-    return parsed.port == port
+    return origin_port == port

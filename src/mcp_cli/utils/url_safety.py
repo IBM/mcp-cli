@@ -48,11 +48,14 @@ def is_safe_fetch_url(url: str) -> bool:
     """
     try:
         parsed = urlsplit(url)
+        host = parsed.hostname
     except ValueError:
+        # urlsplit()/`.hostname` can both raise on malformed input (e.g. a
+        # broken IPv6 literal) - which one depends on the Python version,
+        # so both are covered here rather than just the constructor call.
         return False
     if parsed.scheme not in _ALLOWED_SCHEMES:
         return False
-    host = parsed.hostname
     if not host:
         return False
     try:

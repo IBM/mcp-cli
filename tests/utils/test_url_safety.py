@@ -6,7 +6,7 @@ from __future__ import annotations
 import socket
 from unittest.mock import patch
 
-from mcp_cli.utils.url_safety import is_safe_fetch_url
+from mcp_cli.utils.url_safety import _is_unsafe_address, is_safe_fetch_url
 
 
 def _fake_addrinfo(addr: str):
@@ -67,3 +67,25 @@ class TestIsSafeFetchUrl:
 
     def test_malformed_url_rejected(self):
         assert is_safe_fetch_url("not a url at all") is False
+
+    def test_malformed_ipv6_literal_rejected(self):
+        """Whether the raise happens in urlsplit() or on .hostname access is
+        Python-version-dependent — both must be caught, not just one."""
+        assert is_safe_fetch_url("http://[invalid::ipv6/path") is False
+
+    def test_empty_addrinfo_rejected(self):
+        """getaddrinfo() returning an empty list (no raise) must not be
+        treated as vacuously safe."""
+        with patch(
+            "mcp_cli.utils.url_safety.socket.getaddrinfo",
+            return_value=[],
+        ):
+            assert is_safe_fetch_url("https://no-records.example/") is False
+
+
+class TestIsUnsafeAddress:
+    def test_public_address_is_safe(self):
+        assert _is_unsafe_address("93.184.216.34") is False
+
+    def test_unparsable_address_treated_as_unsafe(self):
+        assert _is_unsafe_address("not-an-ip-address") is True
