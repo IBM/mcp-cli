@@ -49,20 +49,37 @@ class TestMainEntry:
 
     def test_windows_event_loop_policy(self):
         """On Windows, WindowsSelectorEventLoopPolicy should be set."""
+        import asyncio
+
         mock_app = MagicMock()
         mock_policy_cls = MagicMock()
 
-        with (
-            patch.dict("sys.modules", {"mcp_cli.main": MagicMock(app=mock_app)}),
-            patch("mcp_cli.config.PLATFORM_WINDOWS", "win32"),
-            patch("sys.platform", "win32"),
-            patch("asyncio.set_event_loop_policy") as mock_set_policy,
-            patch(
-                "asyncio.WindowsSelectorEventLoopPolicy", mock_policy_cls, create=True
-            ),
-        ):
-            runpy.run_module("mcp_cli.__main__", run_name="__main__", alter_sys=False)
-        mock_set_policy.assert_called_once()
+        # asyncio.WindowsSelectorEventLoopPolicy is a lazily-resolved deprecated
+        # alias on non-Windows platforms (via module __getattr__), and on 3.14
+        # that resolver raises NameError instead of AttributeError when accessed
+        # off Windows. mock.patch(..., create=True) snapshots the original value
+        # via getattr(target, name, DEFAULT), which doesn't catch NameError, so
+        # it blows up before the patch is even applied. Set/restore it as a
+        # plain attribute instead, sidestepping that getattr call entirely.
+        had_attr = "WindowsSelectorEventLoopPolicy" in vars(asyncio)
+        original = vars(asyncio).get("WindowsSelectorEventLoopPolicy")
+        asyncio.WindowsSelectorEventLoopPolicy = mock_policy_cls
+        try:
+            with (
+                patch.dict("sys.modules", {"mcp_cli.main": MagicMock(app=mock_app)}),
+                patch("mcp_cli.config.PLATFORM_WINDOWS", "win32"),
+                patch("sys.platform", "win32"),
+                patch("asyncio.set_event_loop_policy") as mock_set_policy,
+            ):
+                runpy.run_module(
+                    "mcp_cli.__main__", run_name="__main__", alter_sys=False
+                )
+            mock_set_policy.assert_called_once()
+        finally:
+            if had_attr:
+                asyncio.WindowsSelectorEventLoopPolicy = original
+            else:
+                del asyncio.WindowsSelectorEventLoopPolicy
 
     def test_non_windows_no_policy_change(self):
         """On non-Windows, event loop policy should not be changed."""
