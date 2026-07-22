@@ -5,6 +5,7 @@ Unified ping command implementation.
 
 from __future__ import annotations
 
+import logging
 
 from mcp_cli.commands.base import (
     UnifiedCommand,
@@ -12,6 +13,8 @@ from mcp_cli.commands.base import (
     CommandResult,
 )
 from mcp_cli.context import get_context
+
+logger = logging.getLogger(__name__)
 
 
 class PingCommand(UnifiedCommand):
@@ -84,8 +87,8 @@ Examples:
                 context = get_context()
                 if context:
                     tool_manager = context.tool_manager
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to get tool manager from context: %s", e)
 
         if not tool_manager:
             return CommandResult(

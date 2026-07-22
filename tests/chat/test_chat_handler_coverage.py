@@ -41,6 +41,10 @@ def _make_ctx(exit_requested=False):
     ctx.model = "gpt-4"
     ctx.exit_requested = exit_requested
     ctx.add_user_message = AsyncMock()
+    # Real staging so multi-modal processing works correctly (drain returns [])
+    from mcp_cli.chat.attachments import AttachmentStaging
+
+    ctx.attachment_staging = AttachmentStaging()
     return ctx
 
 
@@ -770,3 +774,182 @@ class TestHandleInterruptCommand:
             result = await handle_interrupt_command(ui)
             assert result is True
             mock_output.info.assert_called()
+
+
+# ===========================================================================
+# Tests for multi-agent wiring
+# ===========================================================================
+
+
+class TestMultiAgentWiring:
+    """Tests for multi_agent=True flag in handle_chat_mode."""
+
+    @pytest.mark.asyncio
+    async def test_multi_agent_creates_agent_manager(self):
+        """multi_agent=True creates AgentManager and sets it on context."""
+        tool_mgr = MagicMock()
+        tool_mgr.close = AsyncMock()
+        tool_mgr.get_tool_count = MagicMock(return_value=5)
+
+        mock_ctx = _make_ctx()
+        mock_ctx.initialize = AsyncMock(return_value=True)
+        mock_ctx.agent_id = "default"
+        mock_ctx.dashboard_bridge = None
+        mock_ctx.conversation_history = []
+        mock_ctx.save_session = MagicMock(return_value=None)
+
+        mock_app_ctx = MagicMock()
+        mock_app_ctx.model_manager = MagicMock()
+        mock_app_ctx.initialize = AsyncMock()
+
+        ui = _make_ui()
+        convo = _make_convo()
+
+        mock_bridge = MagicMock()
+        mock_bridge.set_context = MagicMock()
+        mock_bridge.set_tool_call_callback = MagicMock()
+        mock_bridge.set_input_queue = MagicMock()
+        mock_bridge.on_shutdown = AsyncMock()
+        mock_bridge.server = MagicMock()
+        mock_bridge.server.stop = AsyncMock()
+
+        mock_launch = AsyncMock(return_value=(MagicMock(), MagicMock(), 9120))
+        mock_agent_manager = MagicMock()
+        mock_agent_manager.stop_all = AsyncMock()
+
+        with (
+            patch("mcp_cli.chat.chat_handler.initialize_config"),
+            patch(
+                "mcp_cli.chat.chat_handler.initialize_context",
+                return_value=mock_app_ctx,
+            ),
+            patch("mcp_cli.chat.chat_handler.output"),
+            patch("mcp_cli.chat.chat_handler.clear_screen"),
+            patch("mcp_cli.chat.chat_handler.display_chat_banner"),
+            patch("mcp_cli.chat.chat_handler.ChatContext") as MockCC,
+            patch("mcp_cli.chat.chat_handler.ChatUIManager", return_value=ui),
+            patch(
+                "mcp_cli.chat.chat_handler.ConversationProcessor",
+                return_value=convo,
+            ),
+            patch(
+                "mcp_cli.chat.chat_handler._run_enhanced_chat_loop",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "mcp_cli.chat.chat_handler._safe_cleanup",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "mcp_cli.dashboard.launcher.launch_dashboard",
+                mock_launch,
+            ),
+            patch(
+                "mcp_cli.dashboard.bridge.DashboardBridge",
+                return_value=mock_bridge,
+            ),
+            patch(
+                "mcp_cli.agents.manager.AgentManager",
+                return_value=mock_agent_manager,
+            ) as MockAM,
+        ):
+            MockCC.create.return_value = mock_ctx
+
+            from mcp_cli.chat.chat_handler import handle_chat_mode
+
+            result = await handle_chat_mode(
+                tool_mgr,
+                provider="openai",
+                model="gpt-4",
+                multi_agent=True,
+            )
+            assert result is True
+            # AgentManager was constructed
+            MockAM.assert_called_once()
+            # agent_manager set on context
+            assert mock_ctx.agent_manager == mock_agent_manager
+            # stop_all called during cleanup
+            mock_agent_manager.stop_all.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_multi_agent_implies_dashboard(self):
+        """multi_agent=True forces dashboard=True even if not passed."""
+        tool_mgr = MagicMock()
+        tool_mgr.close = AsyncMock()
+        tool_mgr.get_tool_count = MagicMock(return_value=0)
+
+        mock_ctx = _make_ctx()
+        mock_ctx.initialize = AsyncMock(return_value=True)
+        mock_ctx.agent_id = "default"
+        mock_ctx.dashboard_bridge = None
+        mock_ctx.conversation_history = []
+        mock_ctx.save_session = MagicMock(return_value=None)
+
+        mock_app_ctx = MagicMock()
+        mock_app_ctx.model_manager = MagicMock()
+        mock_app_ctx.initialize = AsyncMock()
+
+        ui = _make_ui()
+        convo = _make_convo()
+
+        mock_bridge = MagicMock()
+        mock_bridge.set_context = MagicMock()
+        mock_bridge.set_tool_call_callback = MagicMock()
+        mock_bridge.set_input_queue = MagicMock()
+        mock_bridge.on_shutdown = AsyncMock()
+        mock_bridge.server = MagicMock()
+        mock_bridge.server.stop = AsyncMock()
+
+        mock_launch = AsyncMock(return_value=(MagicMock(), MagicMock(), 9120))
+
+        with (
+            patch("mcp_cli.chat.chat_handler.initialize_config"),
+            patch(
+                "mcp_cli.chat.chat_handler.initialize_context",
+                return_value=mock_app_ctx,
+            ),
+            patch("mcp_cli.chat.chat_handler.output"),
+            patch("mcp_cli.chat.chat_handler.clear_screen"),
+            patch("mcp_cli.chat.chat_handler.display_chat_banner"),
+            patch("mcp_cli.chat.chat_handler.ChatContext") as MockCC,
+            patch("mcp_cli.chat.chat_handler.ChatUIManager", return_value=ui),
+            patch(
+                "mcp_cli.chat.chat_handler.ConversationProcessor",
+                return_value=convo,
+            ),
+            patch(
+                "mcp_cli.chat.chat_handler._run_enhanced_chat_loop",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "mcp_cli.chat.chat_handler._safe_cleanup",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "mcp_cli.dashboard.launcher.launch_dashboard",
+                mock_launch,
+            ),
+            patch(
+                "mcp_cli.dashboard.bridge.DashboardBridge",
+                return_value=mock_bridge,
+            ),
+            patch(
+                "mcp_cli.agents.manager.AgentManager",
+                return_value=MagicMock(stop_all=AsyncMock()),
+            ),
+        ):
+            MockCC.create.return_value = mock_ctx
+
+            from mcp_cli.chat.chat_handler import handle_chat_mode
+
+            # dashboard=False but multi_agent=True — dashboard should still launch
+            result = await handle_chat_mode(
+                tool_mgr,
+                provider="openai",
+                model="gpt-4",
+                dashboard=False,
+                multi_agent=True,
+            )
+            assert result is True
+            # launch_dashboard was called (proving dashboard was forced on)
+            mock_launch.assert_called_once()

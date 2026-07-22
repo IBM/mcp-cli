@@ -70,8 +70,8 @@ class ConfigLoader:
             bundled_path = str(bundled)
             if Path(bundled_path).is_file():
                 return bundled_path
-        except (ImportError, FileNotFoundError, AttributeError, TypeError):
-            pass
+        except (ImportError, FileNotFoundError, AttributeError, TypeError) as e:
+            logger.debug("Bundled config not found: %s", e)
         return None
 
     def load(self) -> dict[str, Any]:

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mcp-cli dashboard</title>
+<link rel="stylesheet" href="/css/variables.css">
+<link rel="stylesheet" href="/css/toolbar.css">
+<link rel="stylesheet" href="/css/drawers.css">
+<link rel="stylesheet" href="/css/grid.css">
+<link rel="stylesheet" href="/css/notifications.css">
+<link rel="stylesheet" href="/css/sidebar.css">
+<link rel="stylesheet" href="/css/agent-tabs.css">
+<link rel="stylesheet" href="/css/responsive.css">
+</head>
+<body>
+
+<!-- ── Toolbar ──────────────────────────────────────────────────── -->
+<div id="toolbar">
+  <div class="brand">
+    <span id="conn-dot"></span>
+    <span>mcp-cli dashboard</span>
+  </div>
+
+  <button class="tb-btn" id="new-session-btn" title="New chat session">+</button>
+  <button class="tb-btn" id="sessions-btn" title="Session history">Sessions</button>
+
+  <div class="dropdown" id="layout-dropdown">
+    <button class="tb-btn" id="layout-btn">Layout ▾</button>
+    <div class="dropdown-menu" id="layout-menu"></div>
+  </div>
+
+  <button class="tb-btn" id="add-panel-btn">+ Add Panel</button>
+  <div class="dropdown" id="add-panel-dropdown">
+    <div class="dropdown-menu" id="add-panel-menu"></div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="tb-group" id="model-group" style="display:none">
+    <span class="tb-label">Provider</span>
+    <select class="tb-select" id="provider-select"></select>
+    <span class="tb-label">Model</span>
+    <select class="tb-select" id="model-select"></select>
+  </div>
+
+  <div class="dropdown" id="export-dropdown">
+    <button class="tb-btn" id="export-btn">Export ▾</button>
+    <div class="dropdown-menu" id="export-menu">
+      <div class="dropdown-item" data-format="markdown">Export as Markdown</div>
+      <div class="dropdown-item" data-format="json">Export as JSON</div>
+    </div>
+  </div>
+
+  <button class="tb-btn" id="settings-btn">⚙</button>
+
+  <button class="tb-btn" id="overflow-btn" title="More options">...</button>
+  <div class="dropdown-menu" id="overflow-menu"></div>
+</div>
+
+<!-- ── Agent tab bar (hidden when ≤1 agent) ─────────────────────── -->
+<div id="agent-tabs"></div>
+
+<!-- ── Settings panel ───────────────────────────────────────────── -->
+<div id="settings-panel">
+  <div class="section">
+    <h3>Theme</h3>
+    <select id="theme-select"></select>
+  </div>
+
+  <div class="section">
+    <h3>System Prompt</h3>
+    <textarea id="system-prompt-editor" placeholder="Loading..."></textarea>
+    <div class="btn-row">
+      <button class="btn-sm primary" id="apply-prompt-btn">Apply</button>
+      <button class="btn-sm" id="reset-prompt-btn">Reset to Default</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>MCP Servers</h3>
+    <ul class="server-list" id="server-list">
+      <li style="font-size:12px;color:var(--dash-fg-muted)">No servers connected</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <button class="btn-sm" style="width:100%" id="save-layout-btn">Save Current Layout</button>
+  </div>
+
+  <div class="section">
+    <h3>Conversation</h3>
+    <button class="btn-sm" style="width:100%;color:var(--dash-error);border-color:var(--dash-error)" id="clear-history-btn">Clear Chat History</button>
+  </div>
+</div>
+
+<!-- ── Session drawer ──────────────────────────────────────────── -->
+<div id="session-drawer">
+  <h3>
+    <span>Sessions</span>
+    <button class="btn-sm" id="refresh-sessions-btn" style="font-size:10px;padding:2px 6px">Refresh</button>
+  </h3>
+  <ul class="session-list" id="session-list">
+    <li class="session-empty">Loading sessions...</li>
+  </ul>
+</div>
+
+<!-- ── Main content: grid + right sidebar ─────────────────────────── -->
+<div id="main-content">
+  <div id="grid-wrapper">
+    <div id="grid-root"></div>
+  </div>
+  <div id="sidebar-resize-handle"></div>
+  <div id="sidebar-panel">
+    <div id="sidebar-header">
+      <span id="sidebar-title">Panels</span>
+      <button id="sidebar-close" title="Close sidebar">&times;</button>
+    </div>
+    <div id="sidebar-view-slot"></div>
+  </div>
+  <div id="view-overlay"></div>
+</div>
+
+<!-- ── Tool approval dialog ─────────────────────────────────────── -->
+<div id="approval-overlay">
+  <div id="approval-dialog">
+    <h3>Tool Confirmation Required</h3>
+    <div class="approval-tool" id="approval-tool-name"></div>
+    <div class="approval-args" id="approval-args"></div>
+    <div class="approval-btns">
+      <button class="btn-deny" id="approval-deny">Deny</button>
+      <button class="btn-approve" id="approval-approve">Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Drawer backdrop (for mobile bottom-sheet drawers) ────────── -->
+<div id="drawer-backdrop"></div>
+
+<!-- ── Sidebar toggle (mobile only) ──────────────────────────────── -->
+<button id="sidebar-toggle" title="Open sidebar">◈</button>
+
+<!-- ── Toast container ──────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<script type="module" src="/js/init.js"></script>
+</body>
+</html>

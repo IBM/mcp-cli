@@ -1,0 +1,96 @@
+/* Settings panel */
+#settings-panel {
+  display: none;
+  position: fixed;
+  top: 40px; right: 8px;
+  width: 320px;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  z-index: 200;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+#settings-panel.open { display: block; }
+#settings-panel h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--dash-fg-muted); text-transform: uppercase; letter-spacing: .05em; }
+#settings-panel label { font-size: 12px; display: block; margin-bottom: 4px; }
+#settings-panel select { width: 100%; padding: 4px 6px; background: var(--dash-bg); border: 1px solid var(--dash-border); border-radius: var(--dash-radius); color: var(--dash-fg); font-size: 12px; }
+#settings-panel .section { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--dash-border); }
+#settings-panel .section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+#settings-panel textarea {
+  width: 100%; padding: 6px 8px; background: var(--dash-bg); border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius); color: var(--dash-fg); font-family: var(--dash-font-mono);
+  font-size: 11px; line-height: 1.4; resize: vertical; min-height: 80px; max-height: 300px;
+}
+#settings-panel textarea:focus { border-color: var(--dash-accent); outline: none; }
+#settings-panel .btn-row { display: flex; gap: 6px; margin-top: 6px; }
+.btn-sm {
+  background: transparent; border: 1px solid var(--dash-border); color: var(--dash-fg);
+  padding: 3px 10px; border-radius: var(--dash-radius); cursor: pointer; font-size: 11px;
+  font-family: var(--dash-font-ui);
+}
+.btn-sm:hover { background: var(--dash-bg-hover); }
+.btn-sm.primary { background: var(--dash-accent); color: var(--dash-bg); border-color: var(--dash-accent); }
+.btn-sm.primary:hover { opacity: 0.9; }
+.server-list { list-style: none; padding: 0; margin: 4px 0 0 0; }
+.server-item {
+  display: flex; align-items: center; gap: 6px; padding: 4px 0;
+  font-size: 12px; border-bottom: 1px solid var(--dash-border);
+}
+.server-item:last-child { border-bottom: none; }
+.server-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.server-dot.on { background: var(--dash-success); }
+.server-dot.off { background: var(--dash-error); }
+.server-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-tools { font-size: 10px; color: var(--dash-fg-muted); }
+
+/* ── Session drawer ────────────────────────────────────────────── */
+#session-drawer {
+  display: none;
+  position: fixed;
+  top: 40px; left: 8px;
+  width: 300px;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  z-index: 200;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+#session-drawer.open { display: block; }
+#session-drawer h3 {
+  font-size: 12px; font-weight: 600; margin-bottom: 8px;
+  color: var(--dash-fg-muted); text-transform: uppercase; letter-spacing: .05em;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.session-list { list-style: none; padding: 0; margin: 0; }
+.session-item {
+  display: flex; align-items: center; gap: 6px; padding: 8px 6px;
+  font-size: 12px; border-bottom: 1px solid var(--dash-border);
+  cursor: pointer; border-radius: var(--dash-radius); transition: background 0.15s;
+}
+.session-item:last-child { border-bottom: none; }
+.session-item:hover { background: var(--dash-bg-hover); }
+.session-item.active { background: var(--dash-bg-hover); border-left: 2px solid var(--dash-accent); }
+.session-info { flex: 1; min-width: 0; }
+.session-id { font-family: var(--dash-font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-desc { font-size: 10px; color: var(--dash-fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-meta { font-size: 10px; color: var(--dash-fg-muted); display: flex; gap: 8px; margin-top: 2px; }
+.session-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.session-actions button {
+  background: transparent; border: none; color: var(--dash-fg-muted);
+  cursor: pointer; font-size: 11px; padding: 2px 4px; border-radius: 3px;
+}
+.session-actions button:hover { color: var(--dash-fg); background: var(--dash-bg-hover); }
+.session-actions button.delete:hover { color: var(--dash-error); }
+.session-empty { color: var(--dash-fg-muted); font-size: 12px; text-align: center; padding: 16px 0; }
+
+/* ── Focus styles ─────────────────────────────────────────────────── */
+.btn-sm:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }
+.session-item:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }
+#settings-panel select:focus-visible,
+#settings-panel textarea:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }

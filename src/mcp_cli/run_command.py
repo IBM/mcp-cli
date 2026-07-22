@@ -141,8 +141,8 @@ async def _safe_close(tm) -> None:
     """Close the ToolManager, swallowing any exception during shutdown."""
     try:
         await tm.close()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Error during ToolManager close: %s", e)
 
 
 # --------------------------------------------------------------------------- #

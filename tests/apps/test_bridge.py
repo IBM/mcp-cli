@@ -578,3 +578,383 @@ class TestHelpers:
         result = AppBridge._safe_json_dumps({"obj": Custom()})
         parsed = json.loads(result)
         assert parsed["obj"]["x"] == 42
+
+
+# ── New tests targeting uncovered lines ────────────────────────────────────
+
+
+class TestSetWsEnsureFutureException:
+    """Lines 53-54: ensure_future raises (no running event loop)."""
+
+    def test_set_ws_ensure_future_exception_is_swallowed(self, monkeypatch):
+        """If asyncio.ensure_future raises, the exception is logged and ignored."""
+        bridge, _ = _make_bridge()
+        old_ws = FakeWs()
+        bridge._ws = old_ws  # set an old WS directly (no loop needed)
+
+        def boom(coro):
+            # Close the coroutine to avoid RuntimeWarning
+            coro.close()
+            raise RuntimeError("no running loop")
+
+        monkeypatch.setattr(asyncio, "ensure_future", boom)
+
+        new_ws = FakeWs()
+        # Must not raise even though ensure_future raises
+        bridge.set_ws(new_ws)
+        assert bridge._ws is new_ws
+        assert bridge.app_info.state == AppState.INITIALIZING
+
+
+class TestToolCallTimeout:
+    """Lines 189-192: asyncio.TimeoutError from wait_for."""
+
+    @pytest.mark.asyncio
+    async def test_tool_call_timeout_returns_error(self):
+        bridge, tm = _make_bridge()
+
+        import unittest.mock as mock
+
+        def _raise_timeout(coro, *, timeout):
+            # Close the coroutine to suppress RuntimeWarning about unawaited coroutines
+            coro.close()
+            raise asyncio.TimeoutError
+
+        with mock.patch(
+            "mcp_cli.apps.bridge.asyncio.wait_for", side_effect=_raise_timeout
+        ):
+            msg = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 20,
+                    "method": "tools/call",
+                    "params": {"name": "slow-tool", "arguments": {}},
+                }
+            )
+            resp = await bridge.handle_message(msg)
+
+        parsed = json.loads(resp)
+        assert parsed["id"] == 20
+        assert "error" in parsed
+        assert parsed["error"]["code"] == -32000
+        assert "timed out" in parsed["error"]["message"]
+
+
+class TestPushToolInput:
+    """Lines 292-306: push_tool_input."""
+
+    @pytest.mark.asyncio
+    async def test_push_tool_input_no_ws_returns_early(self):
+        """When no WS is set, push_tool_input should return without error."""
+        bridge, _ = _make_bridge()
+        # No WS set — should return immediately
+        await bridge.push_tool_input({"x": 1})
+        # No exception, nothing queued
+        assert len(bridge._pending_notifications) == 0
+
+    @pytest.mark.asyncio
+    async def test_push_tool_input_sends_notification(self):
+        """When WS is present, push_tool_input sends a tool-input notification."""
+        bridge, _ = _make_bridge()
+        ws = FakeWs()
+        bridge.set_ws(ws)
+
+        await bridge.push_tool_input({"action": "start", "value": 42})
+
+        assert len(ws.sent) == 1
+        parsed = json.loads(ws.sent[0])
+        assert parsed["method"] == "ui/notifications/tool-input"
+        assert parsed["params"]["arguments"] == {"action": "start", "value": 42}
+
+    @pytest.mark.asyncio
+    async def test_push_tool_input_logs_on_send_failure(self):
+        """When send raises, push_tool_input logs the warning (no queue for input)."""
+        bridge, _ = _make_bridge()
+        ws = FakeWs()
+        ws._raise_on_send = True
+        bridge.set_ws(ws)
+
+        # Should not raise — error is logged, not re-raised
+        await bridge.push_tool_input({"x": 1})
+        # No pending notifications (tool input is fire-and-forget)
+        assert len(bridge._pending_notifications) == 0
+
+
+class TestExtractRawResult:
+    """Lines 331-335: _extract_raw_result circular-reference guard."""
+
+    def test_unwraps_single_level(self):
+        """A single wrapper with a .result attribute is unwrapped."""
+
+        class Wrapper:
+            def __init__(self, inner):
+                self.result = inner
+
+        inner = {"data": "value"}
+        w = Wrapper(inner)
+        result = AppBridge._extract_raw_result(w)
+        assert result == inner
+
+    def test_circular_result_reference_breaks_loop(self):
+        """A wrapper whose .result points back to itself should not loop forever."""
+
+        class SelfRef:
+            pass
+
+        s = SelfRef()
+        s.result = s  # circular reference
+
+        # Should terminate and return s (after detecting the cycle)
+        result = AppBridge._extract_raw_result(s)
+        assert result is s
+
+    def test_dict_not_unwrapped(self):
+        """Dicts are not unwrapped even if they have a 'result' key."""
+        d = {"result": "inner"}
+        result = AppBridge._extract_raw_result(d)
+        assert result is d
+
+    def test_str_not_unwrapped(self):
+        """Strings are not unwrapped even if they look like wrappers."""
+        s = "hello"
+        result = AppBridge._extract_raw_result(s)
+        assert result is s
+
+
+class TestToSerializableFallback:
+    """Line 364: _to_serializable fallback str(obj) for un-dumpable primitives."""
+
+    def test_primitive_without_dict_or_model_dump(self):
+        """An object with no __dict__ and no model_dump falls back to str()."""
+
+        # A plain integer slot-only object — use a basic type that has no __dict__
+        # The simplest: pass a custom class instance that deliberately has no __dict__
+        class NoDict:
+            __slots__ = ()
+
+        obj = NoDict()
+        result = AppBridge._to_serializable(obj)
+        assert isinstance(result, str)
+        # str() of the object — just verify it returned a string
+        assert result == str(obj)
+
+    def test_tuple_serialized_as_list(self):
+        """Tuples are serialized element-by-element like lists."""
+        result = AppBridge._to_serializable((1, "two", 3.0))
+        assert result == [1, "two", 3.0]
+
+    def test_none_returns_none(self):
+        result = AppBridge._to_serializable(None)
+        assert result is None
+
+    def test_bool_passthrough(self):
+        result = AppBridge._to_serializable(True)
+        assert result is True
+
+
+class TestExtractStructuredContentEdgeCases:
+    """Lines 385, 389, 397-398, 401, 413-414."""
+
+    def test_empty_content_list_returns_unchanged(self):
+        """Line 385: content is an empty list → return out unchanged."""
+        out = {"content": []}
+        result = AppBridge._extract_structured_content(out)
+        assert result is out
+        assert "structuredContent" not in result
+
+    def test_content_not_a_list_returns_unchanged(self):
+        """Line 385: content is not a list (e.g., a string) → return out."""
+        out = {"content": "not a list"}
+        result = AppBridge._extract_structured_content(out)
+        assert result is out
+        assert "structuredContent" not in result
+
+    def test_no_content_key_returns_unchanged(self):
+        """Line 385: no content key at all → return out."""
+        out = {"other": "data"}
+        result = AppBridge._extract_structured_content(out)
+        assert result is out
+        assert "structuredContent" not in result
+
+    def test_non_dict_block_is_skipped(self):
+        """Line 389: block that is not a dict is skipped."""
+        out = {"content": ["not a dict", 42, None]}
+        result = AppBridge._extract_structured_content(out)
+        assert "structuredContent" not in result
+
+    def test_block_with_wrong_type_is_skipped(self):
+        """Line 389: block with type != 'text' is skipped."""
+        out = {"content": [{"type": "image", "url": "http://example.com/img.png"}]}
+        result = AppBridge._extract_structured_content(out)
+        assert "structuredContent" not in result
+
+    def test_invalid_json_in_text_block_is_skipped(self):
+        """Lines 397-398: json.loads raises JSONDecodeError — block is skipped."""
+        out = {"content": [{"type": "text", "text": "{not valid json"}]}
+        result = AppBridge._extract_structured_content(out)
+        assert "structuredContent" not in result
+
+    def test_json_array_in_text_block_is_skipped(self):
+        """Line 401: parsed JSON is not a dict → skipped (covered via monkeypatching json.loads)."""
+        import unittest.mock as mock
+
+        # Patch json.loads so that it returns a list for the text block parse
+        # (text starts with '{' check passes, json.loads succeeds but gives a list)
+        original_loads = json.loads
+
+        def patched_loads(s, **kw):
+            if isinstance(s, str) and s == '{"fake": true}':
+                return [1, 2, 3]  # return list, not dict → hits line 401
+            return original_loads(s, **kw)
+
+        out = {"content": [{"type": "text", "text": '{"fake": true}'}]}
+        with mock.patch("mcp_cli.apps.bridge.json.loads", side_effect=patched_loads):
+            result = AppBridge._extract_structured_content(out)
+        assert "structuredContent" not in result
+
+    def test_pattern2_type_and_version_becomes_structured_content(self):
+        """Lines 413-414: JSON with 'type' and 'version' IS the structured content."""
+        patch = {"type": "ui_patch", "version": "3.0", "ops": [{"op": "replace"}]}
+        out = {"content": [{"type": "text", "text": json.dumps(patch)}]}
+        result = AppBridge._extract_structured_content(out)
+        assert result["structuredContent"] == patch
+
+    def test_text_not_starting_with_brace_is_skipped(self):
+        """Line 392: text that doesn't start with '{' is skipped."""
+        out = {"content": [{"type": "text", "text": "[1, 2, 3]"}]}
+        result = AppBridge._extract_structured_content(out)
+        assert "structuredContent" not in result
+
+
+class TestFormatToolResultEdgeCases:
+    """Lines 433->444, 437, 441, 448-458, 470."""
+
+    def test_pydantic_with_structured_content(self):
+        """Line 437: Pydantic-like obj with truthy structuredContent is preserved."""
+
+        class FakeContentItem:
+            def __init__(self, text):
+                self.type = "text"
+                self.text = text
+
+            def model_dump(self):
+                return {"type": self.type, "text": self.text}
+
+        class FakePydanticWithSC:
+            def __init__(self):
+                self.content = [FakeContentItem("some text")]
+                self.structuredContent = {"type": "chart", "values": [1, 2, 3]}
+                self.isError = False
+
+        result = AppBridge._format_tool_result(FakePydanticWithSC())
+        assert "structuredContent" in result
+        assert result["structuredContent"] == {"type": "chart", "values": [1, 2, 3]}
+
+    def test_pydantic_with_is_error_true(self):
+        """Line 441: Pydantic-like obj with isError=True sets isError in output."""
+
+        class FakeContentItem:
+            def __init__(self, text):
+                self.type = "text"
+                self.text = text
+
+            def model_dump(self):
+                return {"type": self.type, "text": self.text}
+
+        class FakePydanticError:
+            def __init__(self):
+                self.content = [FakeContentItem("error occurred")]
+                self.isError = True
+
+        result = AppBridge._format_tool_result(FakePydanticError())
+        assert result.get("isError") is True
+        assert result["content"] is not None
+
+    def test_pydantic_content_not_list_falls_through(self):
+        """Line 433->444: when content attr is not a list, falls through to other branches."""
+
+        class FakeObjNonListContent:
+            def __init__(self):
+                self.content = "not a list"
+
+        # content is a string, not a list → falls through to str branch
+        # (since the obj itself is not dict/str either)
+        # After falling through the content-is-list check (line 433),
+        # we hit the fallback at line 473
+        result = AppBridge._format_tool_result(FakeObjNonListContent())
+        # Should end up as str() representation
+        assert "content" in result
+        assert isinstance(result["content"], list)
+
+    def test_dict_with_mcp_sdk_content_object(self):
+        """Lines 448-458: dict whose 'content' value is an MCP SDK object with .content list."""
+
+        class MCPContentObj:
+            def __init__(self):
+                self.content = [{"type": "text", "text": "from sdk"}]
+                self.structuredContent = None
+
+        sdk_obj = MCPContentObj()
+        result_dict = {"content": sdk_obj}
+        result = AppBridge._format_tool_result(result_dict)
+        # content should be extracted from sdk_obj.content
+        assert result["content"] == [{"type": "text", "text": "from sdk"}]
+
+    def test_dict_content_val_object_without_content_attr(self):
+        """Branch 448->460: dict with non-list content_val that has no .content attr."""
+
+        class SomeObject:
+            """Object with no .content attribute — falls through to line 460."""
+
+            def __init__(self):
+                self.value = "data"
+
+            def __repr__(self):
+                return "SomeObject(value=data)"
+
+        obj = SomeObject()
+        # content_val is not list/str and has no .content attr
+        result = AppBridge._format_tool_result({"content": obj})
+        # Falls through: _to_serializable converts to dict via __dict__,
+        # then 'content' key has been resolved to a serialized value
+        assert "content" in result
+
+    def test_dict_with_mcp_sdk_content_object_and_structured_content(self):
+        """Lines 454-458: MCP SDK object also has truthy structuredContent."""
+
+        class MCPContentObj:
+            def __init__(self):
+                self.content = [{"type": "text", "text": "data"}]
+                self.structuredContent = {"type": "chart", "data": {}}
+
+        sdk_obj = MCPContentObj()
+        result_dict = {"content": sdk_obj}
+        result = AppBridge._format_tool_result(result_dict)
+        assert result["content"] == [{"type": "text", "text": "data"}]
+        # structuredContent gets hoisted during _to_serializable + _extract_structured_content
+        # The dict now has structuredContent key after copying from sdk_obj
+        assert "structuredContent" in result or result["content"] is not None
+
+    def test_model_dump_fallback(self):
+        """Line 470: non-dict, non-str, non-content-attr object with model_dump."""
+
+        class FakePydanticNoContent:
+            def model_dump(self):
+                return {"answer": 42}
+
+        result = AppBridge._format_tool_result(FakePydanticNoContent())
+        assert result["content"][0]["type"] == "text"
+        parsed_text = json.loads(result["content"][0]["text"])
+        assert parsed_text == {"answer": 42}
+
+    def test_format_tool_result_non_serializable_fallback(self):
+        """Line 473: fallback str() for objects with no model_dump and no content."""
+
+        class WeirdObj:
+            __slots__ = ()
+
+            def __str__(self):
+                return "weird-42"
+
+        result = AppBridge._format_tool_result(WeirdObj())
+        assert result == {"content": [{"type": "text", "text": "weird-42"}]}

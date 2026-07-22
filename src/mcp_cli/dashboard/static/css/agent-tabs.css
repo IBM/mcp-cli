@@ -1,0 +1,47 @@
+/* ── Agent tab bar ─────────────────────────────────────────────── */
+#agent-tabs {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  height: 28px;
+  min-height: 28px;
+  background: var(--dash-bg);
+  border-bottom: 1px solid var(--dash-border);
+  flex-shrink: 0;
+  user-select: none;
+  overflow-x: auto;
+}
+#agent-tabs.visible { display: flex; }
+.agent-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--dash-radius);
+  background: transparent;
+  color: var(--dash-fg-muted);
+  font-size: 11px;
+  font-family: var(--dash-font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.agent-tab:hover { background: var(--dash-bg-hover); color: var(--dash-fg); }
+.agent-tab.focused {
+  background: var(--dash-bg-surface);
+  color: var(--dash-fg);
+  border-color: var(--dash-accent);
+}
+.agent-tab-indicator {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.agent-tab-indicator.active    { background: var(--dash-success); }
+.agent-tab-indicator.paused    { background: var(--dash-warning); }
+.agent-tab-indicator.completed { background: var(--dash-fg-muted); }
+.agent-tab-indicator.failed    { background: var(--dash-error); }
+
+/* (view-stash removed — iframes now live permanently in #view-overlay) */

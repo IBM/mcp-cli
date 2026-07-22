@@ -125,6 +125,61 @@ def main_callback(
         "--log-file",
         help="Write debug logs to a rotating file (expands ~, creates dirs)",
     ),
+    vm: bool = typer.Option(
+        False,
+        "--vm",
+        help="[Experimental] Enable AI virtual memory for context management",
+    ),
+    vm_mode: str = typer.Option(
+        "passive",
+        "--vm-mode",
+        help="VM mode: passive (runtime-managed), relaxed, or strict (model-driven paging)",
+    ),
+    vm_budget: int = typer.Option(
+        128_000,
+        "--vm-budget",
+        help="Token budget for conversation events in VM mode (on top of system prompt)",
+    ),
+    health_interval: int = typer.Option(
+        0,
+        "--health-interval",
+        help="Background server health check interval in seconds (0 = disabled)",
+    ),
+    plan_tools: bool = typer.Option(
+        False,
+        "--plan-tools",
+        help="Enable plan_create/plan_execute as LLM-callable tools for autonomous multi-step planning",
+    ),
+    dashboard: bool = typer.Option(
+        False,
+        "--dashboard",
+        help="Open browser dashboard alongside chat (requires: pip install mcp-cli[dashboard])",
+    ),
+    no_browser: bool = typer.Option(
+        False,
+        "--no-browser",
+        help="Start dashboard server but do not auto-open the browser (prints URL instead)",
+    ),
+    dashboard_port: int = typer.Option(
+        0,
+        "--dashboard-port",
+        help="Dashboard HTTP port (0 = auto-select starting at 9120)",
+    ),
+    multi_agent: bool = typer.Option(
+        False,
+        "--multi-agent",
+        help="Enable multi-agent orchestration tools (agent_spawn, agent_stop, etc.). Implies --dashboard.",
+    ),
+    attach: list[str] | None = typer.Option(
+        None,
+        "--attach",
+        help="Attach files to the first message (repeatable: --attach img.png --attach code.py).",
+    ),
+    no_tools: bool = typer.Option(
+        False,
+        "--no-tools",
+        help="Disable tool calling — chat with the LLM directly without MCP tools.",
+    ),
 ) -> None:
     """MCP CLI - If no subcommand is given, start chat mode."""
 
@@ -333,8 +388,11 @@ def main_callback(
             logger.debug("Initializing tool manager")
             from mcp_cli.run_command import _init_tool_manager
 
+            # --no-tools: skip MCP server connections entirely
+            _servers = [] if no_tools else servers
+            _server_names = {} if no_tools else server_names
             tm = await _init_tool_manager(
-                config_file, servers, server_names, init_timeout, runtime_config
+                config_file, _servers, _server_names, init_timeout, runtime_config
             )
 
             logger.debug("Starting chat mode handler")
@@ -347,6 +405,17 @@ def main_callback(
                 max_turns=max_turns,
                 model_manager=model_manager,  # FIXED: Pass the model manager with runtime provider
                 runtime_config=runtime_config,  # Pass runtime config with timeout overrides
+                enable_vm=vm,
+                vm_mode=vm_mode,
+                vm_budget=vm_budget,
+                health_interval=health_interval,
+                enable_plan_tools=plan_tools,
+                dashboard=dashboard,
+                no_browser=no_browser,
+                dashboard_port=dashboard_port,
+                multi_agent=multi_agent,
+                initial_attachments=attach,
+                no_tools=no_tools,
             )
             logger.debug(f"Chat mode completed with success: {success}")
         except asyncio.TimeoutError:
@@ -425,6 +494,61 @@ def _chat_command(
         120.0,
         "--init-timeout",
         help="Server initialization timeout in seconds",
+    ),
+    vm: bool = typer.Option(
+        False,
+        "--vm",
+        help="[Experimental] Enable AI virtual memory for context management",
+    ),
+    vm_mode: str = typer.Option(
+        "passive",
+        "--vm-mode",
+        help="VM mode: passive (runtime-managed), relaxed, or strict (model-driven paging)",
+    ),
+    vm_budget: int = typer.Option(
+        128_000,
+        "--vm-budget",
+        help="Token budget for conversation events in VM mode (on top of system prompt)",
+    ),
+    health_interval: int = typer.Option(
+        0,
+        "--health-interval",
+        help="Background server health check interval in seconds (0 = disabled)",
+    ),
+    plan_tools: bool = typer.Option(
+        False,
+        "--plan-tools",
+        help="Enable plan_create/plan_execute as LLM-callable tools for autonomous multi-step planning",
+    ),
+    dashboard: bool = typer.Option(
+        False,
+        "--dashboard",
+        help="Open browser dashboard alongside chat (requires: pip install mcp-cli[dashboard])",
+    ),
+    no_browser: bool = typer.Option(
+        False,
+        "--no-browser",
+        help="Start dashboard server but do not auto-open the browser (prints URL instead)",
+    ),
+    dashboard_port: int = typer.Option(
+        0,
+        "--dashboard-port",
+        help="Dashboard HTTP port (0 = auto-select starting at 9120)",
+    ),
+    multi_agent: bool = typer.Option(
+        False,
+        "--multi-agent",
+        help="Enable multi-agent orchestration tools (agent_spawn, agent_stop, etc.). Implies --dashboard.",
+    ),
+    attach: list[str] | None = typer.Option(
+        None,
+        "--attach",
+        help="Attach files to the first message (repeatable: --attach img.png --attach code.py).",
+    ),
+    no_tools: bool = typer.Option(
+        False,
+        "--no-tools",
+        help="Disable tool calling — chat with the LLM directly without MCP tools.",
     ),
 ) -> None:
     """Start chat mode (same as default behavior without subcommand)."""
@@ -545,8 +669,11 @@ def _chat_command(
             logger.debug("Initializing tool manager")
             from mcp_cli.run_command import _init_tool_manager
 
+            # --no-tools: skip MCP server connections entirely
+            _servers = [] if no_tools else servers
+            _server_names = {} if no_tools else server_names
             tm = await _init_tool_manager(
-                config_file, servers, server_names, init_timeout
+                config_file, _servers, _server_names, init_timeout
             )
 
             logger.debug("Starting chat mode handler")
@@ -556,6 +683,17 @@ def _chat_command(
                 model=effective_model,
                 api_base=api_base,
                 api_key=api_key,
+                enable_vm=vm,
+                vm_mode=vm_mode,
+                vm_budget=vm_budget,
+                health_interval=health_interval,
+                enable_plan_tools=plan_tools,
+                dashboard=dashboard,
+                no_browser=no_browser,
+                dashboard_port=dashboard_port,
+                multi_agent=multi_agent,
+                initial_attachments=attach,
+                no_tools=no_tools,
             )
             logger.debug(f"Chat mode completed with success: {success}")
         except asyncio.TimeoutError:
@@ -1555,7 +1693,7 @@ def cmd_command(
     )
 
 
-direct_registered.append("cmd")
+# "cmd" is registered via unified registry (CmdCommand), no need for direct_registered
 
 
 # Ping command - test connectivity

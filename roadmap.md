@@ -318,9 +318,15 @@ Interactive HTML UIs served by MCP servers, rendered in sandboxed browser iframe
 - Added `DEFAULT_LOG_DIR`, `DEFAULT_LOG_MAX_BYTES`, `DEFAULT_LOG_BACKUP_COUNT` to defaults.py
 - 16 tests in `tests/config/test_logging_redaction.py`
 
-### 5.2 Server Health Monitoring
+### 5.2 Server Health Monitoring ✅ COMPLETE
 
-Deferred — requires `StreamManager` reconnect hooks in chuk-tool-processor (upstream dependency).
+**Files:** `src/mcp_cli/tools/manager.py`, `src/mcp_cli/commands/servers/health.py`, `src/mcp_cli/chat/conversation.py`, `src/mcp_cli/main.py`
+
+- **Health-check-on-failure**: `ToolManager.execute_tool()` detects connection errors via `_is_connection_error()`, runs `_diagnose_server()` to enrich error messages with server status
+- **`/health` command**: New `HealthCommand` checks one or all servers via `tool_manager.check_server_health()`, shows status (healthy/unhealthy/timeout/error) and latency
+- **Background health polling**: `ConversationProcessor._health_poll_loop()` runs at `--health-interval` seconds, logs status transitions (e.g. healthy → unhealthy)
+- **`--health-interval` CLI flag**: Enables background polling (0 = disabled, default)
+- **Note**: Server *reconnect* still requires upstream `StreamManager` hooks; health *monitoring* is complete
 
 ### 5.3 Per-Server Configuration
 
@@ -342,52 +348,451 @@ Deferred — requires `StreamManager` reconnect hooks in chuk-tool-processor (up
 
 ---
 
-## Tier 6: Execution Graphs & Plans
+## AI Virtual Memory Integration (Experimental) ✅ COMPLETE
+
+OS-style virtual memory for conversation context management, powered by `chuk-ai-session-manager`.
+
+### Implementation
+
+- **`--vm` CLI flag**: Enables VM subsystem in SessionManager; system prompt replaced with VM-packed `developer_message` containing rules, manifest (page index), and working set content
+- **`--vm-budget`**: Token budget for conversation events (system prompt uncapped on top); forces earlier page creation and eviction at low values
+- **`--vm-mode`**: `passive` (runtime-managed, default), `relaxed` (VM-aware conversation), `strict` (model-driven paging with page_fault/search_pages tools)
+- **Budget-aware context filtering**: `_vm_filter_events()` groups conversation events into logical turns, includes newest-first within budget, guarantees minimum 3 recent turns; evicted content preserved as VM pages in developer_message
+- **`/memory` slash command** (aliases: `/vm`, `/mem`): Dashboard showing mode, turn, budget, working set utilization, page table, fault/eviction/TLB metrics; subcommands for page listing, page detail, and full stats dump
+- **VM tool wiring (strict/relaxed)**: `page_fault` and `search_pages` tools injected into `openai_tools` for non-passive modes; intercepted in `tool_processor.py` before MCP guard checks and executed locally via `MemoryManager`; short-content annotation guides model to fault adjacent `[assistant]` response pages; `[user]`/`[assistant]` hint prefixes in manifest
+- **E2E demo**: 8 recall scenarios (simple facts, creative content, tool results, negative case, deep detail, multi-fault, structured data, image description) with distractor tools; validates correct tool selection and content recall
+
+### Multimodal Content Re-analysis ✅ COMPLETE
+
+**Files:** `src/mcp_cli/chat/tool_processor.py`, `src/mcp_cli/chat/models.py`, `src/mcp_cli/commands/memory/memory.py`
+
+- **Multi-block tool results**: `_build_page_content_blocks()` detects page modality and returns `list[dict]` (text + image_url blocks) for image pages with URLs/data URIs, or JSON string with modality/compression metadata for text/structured pages
+- **HistoryMessage content type**: Extended from `str | None` to `str | list[dict[str, Any]] | None` to support OpenAI multi-block content format
+- **`_add_tool_result_to_history()`**: Accepts multi-block content, skips truncation for list content
+- **Compression-aware notes**: Compressed pages (ABSTRACT/REFERENCE) include a note guiding the model to re-fault at target_level=0 for full content; short pages suggest checking for the adjacent assistant response page
+- **`/memory page <id> --download`**: Exports page content to `~/.mcp-cli/downloads/` with modality-aware extensions (.txt, .json, .png) and base64 data URI decoding
+- **Modality metadata display**: `/memory page <id>` shows MIME type, dimensions, duration, and caption when available
+
+### Files
+
+| File | Change |
+|------|--------|
+| `src/mcp_cli/config/defaults.py` | `DEFAULT_ENABLE_VM`, `DEFAULT_VM_MODE`, `DEFAULT_VM_BUDGET` |
+| `src/mcp_cli/chat/chat_context.py` | VM params in init/create, `_vm_filter_events()`, VM context in `conversation_history`, `_health_interval` |
+| `src/mcp_cli/chat/chat_handler.py` | Thread `enable_vm`, `vm_mode`, `vm_budget`, `health_interval` to ChatContext |
+| `src/mcp_cli/chat/conversation.py` | Background health polling (`_health_poll_loop`, `_start_health_polling`, `_stop_health_polling`) |
+| `src/mcp_cli/chat/tool_processor.py` | `_build_page_content_blocks()`, multi-block `_add_tool_result_to_history()` |
+| `src/mcp_cli/chat/models.py` | `HistoryMessage.content` extended to `str \| list[dict] \| None` |
+| `src/mcp_cli/main.py` | `--vm`, `--vm-mode`, `--vm-budget`, `--health-interval` CLI options |
+| `src/mcp_cli/tools/manager.py` | `check_server_health()`, `_diagnose_server()`, `_is_connection_error()` |
+| `src/mcp_cli/commands/memory/` | `MemoryCommand` with summary/pages/page/stats/download subcommands |
+| `src/mcp_cli/commands/servers/health.py` | `HealthCommand` — `/health` slash command |
+
+---
+
+## Tier 6: Execution Graphs & Plans ✅ COMPLETE
 
 > **Shift:** conversation → reasoning → tools **becomes** intent → plan → execution → memory → replay
+>
+> **Spec:** `specs/6.0-planner-integration.md`
+> **Integration:** `chuk-ai-planner>=0.2` — graph-based plan DSL, executor, LLM plan generation
 
-### 6.1 First-Class Plans
+### 6.0 Planner Foundation Wiring ✅
 
-Today the AI reasons from scratch each time. Plans make workflows reproducible, shareable, schedulable, and testable — Terraform for agents.
+Bridge `chuk-ai-planner` to mcp-cli's MCP tool execution layer.
+
+**Files:**
+- `src/mcp_cli/planning/backends.py` — `McpToolBackend` (implements `ToolExecutionBackend` protocol, wraps `ToolManager.execute_tool()`)
+- `src/mcp_cli/planning/context.py` — `PlanningContext` (state container: graph store, tool manager, plan registry, tool catalog)
+- `src/mcp_cli/planning/executor.py` — `PlanRunner` (orchestrates plan execution with guard integration, dry-run, checkpointing)
+- `src/mcp_cli/planning/__init__.py` — Public API
+
+**Key integration:** chuk-ai-planner's `ToolProcessorBackend` calls `CTP.process()` for registered Python functions. `McpToolBackend` instead calls `ToolManager.execute_tool()` for real MCP server tools — same protocol interface, different execution path.
+
+### 6.1 Plan Commands ✅
 
 ```
-mcp plan create "plan a coastal walk tomorrow"
-mcp plan inspect 42
-mcp plan run 42
-mcp plan replay 42 --dry-run
+mcp plan create "add auth to this API"
+mcp plan list
+mcp plan show <id>
+mcp plan run <id>
+mcp plan run <id> --dry-run
+mcp plan delete <id>
+mcp plan resume <id>
 ```
+
+**Files:**
+- `src/mcp_cli/commands/plan/plan.py` — `PlanCommand` (unified command, supports CHAT + CLI + INTERACTIVE)
+- `src/mcp_cli/config/enums.py` — `PlanAction` enum
+
+**Chat mode:** `/plan create "description"`, `/plan list`, `/plan run <id>`
 
 - Plan = persistent, inspectable execution graph (DAG of tool calls + decisions)
-- Plans are serialized (YAML/JSON) and version-controlled
-- `replay --dry-run` shows what would execute without side effects
-- Plans can be parameterized: `mcp plan run 42 --date 2026-03-01`
+- Plans are serialized as JSON at `~/.mcp-cli/plans/`
+- `--dry-run` shows what would execute without side effects
+- Plans can be parameterized: `mcp plan run <id> --var date=2026-03-01`
 
-### 6.2 Simulation / Dry-Run Mode
+### 6.2 Plan Execution with Guards ✅
+
+Plan execution respects mcp-cli's existing guard infrastructure:
+
+- Pre-execution: `ToolStateManager.check_all_guards()` — budget, runaway, per-tool limits
+- Post-execution: `ToolStateManager.record_tool_call()` — tracking + value binding
+- Step error handling: retry (via `PlanStep.max_retries`), fallback, or pause for user input
+- Budget shared with conversation — plan execution counts against same limits
+- 55 tests covering guard integration, PlanRegistry round-trips, DAG visualization
+
+### 6.3 Execution Checkpointing & Resume ✅
+
+- After each step: persist state to `~/.mcp-cli/plans/{id}_state.json`
+- `mcp plan resume <id>` — loads checkpoint, skips completed steps, continues
+- Tracks: completed steps, variable bindings, failed steps, timing
+
+### 6.4 Simulation / Dry-Run Mode ✅
 
 Critical for trust. Show planned tool calls without executing them.
 
 ```
-mcp run "delete inactive users" --simulate
+mcp plan run <id> --dry-run
 ```
 
-- Traces the full execution path
-- Shows tool calls that *would* happen, with estimated arguments
+- Walks plan in topological order
+- Resolves `${var}` references
+- Displays each step: tool name, resolved arguments, dependencies
+- Reports estimated tool call count
 - No side effects — safe to run in production
-- Foundation for plan creation: `--simulate` output becomes a plan
 
-### 6.3 Deterministic Mode
+### 6.5 Parallel Step Execution ✅
 
-Enterprise reliability — bounded, predictable execution.
+Independent plan steps execute concurrently via topological batch ordering:
+
+- `_compute_batches()` uses Kahn's BFS topological sort to group steps into parallel batches
+- Steps within a batch run concurrently via `asyncio.gather()` with semaphore-controlled concurrency
+- Batches execute sequentially to respect dependency ordering
+- `max_concurrency` parameter (default: 4) limits concurrent tool calls
+- Diamond DAG (1 → 2,3,4 → 5) executes with 3 batches: [1], [2,3,4], [5]
+- Variable resolution: `${var}`, `${var.field.subfield}`, template strings — type-preserving for single refs
+
+### 6.6 DAG Visualization ✅
+
+Terminal visualization of plan execution:
+
+- Terminal: ASCII DAG rendering with step status indicators (○ pending, ◉ running, ● completed, ✗ failed)
+- `render_plan_dag()` function for terminal display
+- Parallel step indicator (∥) marks steps that run concurrently within a batch
+- Browser: MCP App panel with D3 force-directed graph, live WebSocket updates (Future)
+
+### 6.7 Re-planning ✅
+
+Adaptive re-planning when execution hits problems (opt-in via `enable_replan=True`):
+
+- On step failure: injects failure context (completed steps, error, remaining steps, variables) into PlanAgent
+- PlanAgent generates a revised plan for the remaining work
+- Revised plan executes with the current variable context (no recursive re-planning)
+- Results merged: completed steps from original + steps from revised plan
+- `max_replans` parameter (default: 2) limits re-planning attempts
+- `PlanExecutionResult.replanned` flag indicates whether re-planning occurred
+- Disabled by default — failure just fails without LLM involvement
+
+### 6.8 Model-Driven Planning (Plan as a Tool) ✅
+
+The model can autonomously create and execute plans during conversation — no `/plan` command required.
+
+When the model determines a task needs multi-step orchestration, it calls an internal `plan` tool to decompose the task into a structured execution graph, then executes it — all within the normal chat flow.
+
+**Internal tools (intercepted before MCP routing, like VM tools):**
+
+| Tool | Purpose |
+|------|---------|
+| `plan_create` | Model describes a goal → PlanAgent generates a plan DAG → returns plan ID + step summary |
+| `plan_execute` | Model passes plan ID → PlanRunner executes → returns results + variables |
+| `plan_create_and_execute` | Combined: generate + execute in one call (common case) |
+
+**How it works:**
 
 ```
-mcp run "book cheapest train" --deterministic
+User: "What's the weather like for sailing in Raglan tomorrow?"
+
+Model (internally): This needs geocoding then weather lookup.
+  → calls plan_create_and_execute(goal="Get weather forecast for Raglan, NZ")
+  → PlanAgent generates: [geocode Raglan] → [get weather for coords]
+  → PlanRunner executes both steps via MCP servers
+  → Results flow back to model as tool result
+
+Model: "Tomorrow in Raglan: 18°C, light winds from the SW at 12 km/h,
+        partly cloudy. Good conditions for sailing."
 ```
 
-- Fixed tool selection (no exploration)
-- Bounded reasoning (max turns, max tokens)
-- Structured outputs with schema validation
-- Configurable retry policies
-- Reproducible given same inputs
+**Key design decisions:**
+
+- **Intercepted like VM tools:** `plan_create`, `plan_execute`, `plan_create_and_execute` are caught in `tool_processor.py` before MCP guard routing, executed locally via PlanRunner
+- **Model decides when to plan:** The system prompt describes the planning tools; the model calls them when it determines multi-step orchestration is more effective than sequential tool calls
+- **Plans are ephemeral by default:** Created during conversation, not persisted unless the model or user explicitly saves them. Reduces clutter vs `/plan create`
+- **Shares guard budget:** Plan tool calls count against the same budget as regular tool calls
+- **Display integration:** Plan execution renders with the same `StreamingDisplayManager` callbacks as regular tool calls — the user sees each step executing in real time
+- **Variable flow:** Plan results are returned as the tool result, so the model can reference them naturally in its response
+- **Opt-in via system prompt:** The planning tools only appear when `--enable-plan-tools` is set (or equivalent config), so the model doesn't attempt planning on simple tasks
+
+**Files:**
+- `src/mcp_cli/chat/tool_processor.py` — Intercept `plan_create` / `plan_execute` / `plan_create_and_execute` before MCP routing
+- `src/mcp_cli/planning/tools.py` — Tool definitions (OpenAI function format) and execution handlers
+- `src/mcp_cli/chat/system_prompt.py` — Inject planning tool descriptions when enabled
+- `src/mcp_cli/config/defaults.py` — `DEFAULT_ENABLE_PLAN_TOOLS = False`
+
+**Why this matters:**
+
+Today: User types `/plan create "get weather for Raglan"` → plan generated → user types `/plan run <id>` → result shown. Three interactions.
+
+With 6.8: User asks a question → model decides it needs a plan → creates and executes it → answers. One interaction. The model becomes a self-orchestrating agent when the task demands it, and a simple chatbot when it doesn't.
+
+---
+
+## Dashboard & Multi-Modal ✅ COMPLETE
+
+> **Goal:** Give users a real-time browser UI for conversations and enable multi-modal input (images, text files, audio) across CLI and browser.
+
+### D.1 Dashboard Infrastructure ✅
+
+Real-time browser dashboard alongside chat mode via `--dashboard` flag.
+
+**Files:** `src/mcp_cli/dashboard/` — `server.py`, `bridge.py`, `launcher.py`, `config.py`, `router.py`
+
+- HTTP + WebSocket server on a single port (`server.py`)
+- Bridge integrates chat engine events → browser clients (`bridge.py`)
+- Router supports multi-agent coordination (`router.py`)
+- Shell host page manages view iframes and WebSocket connection (`shell.html`)
+- Session replay on connect: `CONVERSATION_HISTORY` + `ACTIVITY_HISTORY`
+
+### D.2 Dashboard Views ✅
+
+Five tabbed views in the browser UI.
+
+**Files:** `src/mcp_cli/dashboard/static/views/` — `agent-terminal.html`, `activity-stream.html`, `plan-viewer.html`, `tool-registry.html`, `config-panel.html`
+
+- **Agent Terminal**: Chat bubbles, streaming tokens, markdown rendering, syntax highlighting, search
+- **Activity Stream**: Tool call/result pairs, reasoning steps, state transitions
+- **Plan Viewer**: DAG visualization with real-time step progress
+- **Tool Registry**: Browse tools, trigger execution from browser
+- **Config Panel**: View/switch providers, models, system prompt
+
+### D.3 Multi-Modal Attachments ✅
+
+Attach images, text files, and audio to messages via CLI and browser.
+
+**Files:** `src/mcp_cli/chat/attachments.py`, `src/mcp_cli/chat/chat_handler.py`, `src/mcp_cli/chat/chat_context.py`, `src/mcp_cli/commands/attach/attach.py`, `src/mcp_cli/main.py`
+
+- `/attach` command with staging, list, clear (aliases: `/file`, `/image`)
+- `--attach` CLI flag (repeatable) for first-message attachments
+- Inline `@file:path` references parsed from message text
+- Image URL auto-detection (HTTP/HTTPS `.png`, `.jpg`, `.gif`, `.webp`)
+- `AttachmentStaging` on `ChatContext` — drain-on-send lifecycle
+- `build_multimodal_content()` assembles content block lists
+- Supported: PNG, JPEG, GIF, WebP, HEIC, MP3, WAV, 25+ text/code extensions
+- 20 MB max per file, 10 attachments per message
+
+### D.4 Dashboard Attachment Visualization ✅
+
+Render attachments in the browser UI.
+
+**Files:** `src/mcp_cli/dashboard/bridge.py`, `src/mcp_cli/dashboard/static/views/agent-terminal.html`, `src/mcp_cli/dashboard/static/views/activity-stream.html`
+
+- Lightweight attachment descriptors over WebSocket (no large base64 payloads)
+- Image thumbnails for files <100KB, metadata badges for larger files
+- Expandable text previews (first 2000 chars)
+- Audio players (HTML5 `<audio>`)
+- Activity stream shows attachment events with paperclip badges
+
+### D.5 Browser File Upload ✅
+
+Attach files directly from the dashboard browser UI.
+
+**Files:** `src/mcp_cli/dashboard/static/views/agent-terminal.html`, `src/mcp_cli/dashboard/static/shell.html`, `src/mcp_cli/dashboard/bridge.py`, `src/mcp_cli/dashboard/server.py`
+
+- "+" attach button in chat input area
+- Hidden file input with supported extension filter
+- Staging strip with removable badges and image thumbnails
+- Drag-and-drop overlay
+- Clipboard paste support (images)
+- `process_browser_file()` constructs `Attachment` from browser base64 data
+- Bridge stages files on `ChatContext.attachment_staging`
+- WebSocket `max_size` increased to 25 MB
+
+---
+
+## Dashboard v2: Intelligence Layer
+
+> **Goal:** Evolve the dashboard from a passive conversation viewer into an active operations console — memory visualization, token economics, tool analytics, session management, and multi-agent oversight.
+
+### Original Spec Compliance
+
+The v0.1.0 Dashboard Shell Specification is nearly fully implemented:
+
+| Spec Section | Status | Notes |
+|-------------|--------|-------|
+| §2 Launch (`--dashboard`, port, browser) | ✅ | Port auto-select from 9120, `--no-browser` flag |
+| §3 Architecture (server, bridge, shell, iframes) | ✅ | Exact architecture as specified |
+| §4 Shell page (CSS Grid, panel chrome, toolbar) | ✅ | Pop-out, minimize, close, drag-swap, resize handles |
+| §5 View protocol (postMessage, INIT, READY, TOOL_RESULT) | ✅ | Full protocol with 5s READY timeout |
+| §6.1 Agent terminal (markdown, streaming, /commands) | ✅ | Plus attachments, search, drag-drop |
+| §6.2 Activity stream (events, filters, virtual scroll) | ✅ | Plus agent badges, plan updates |
+| §7 View discovery (_meta.ui → VIEW_REGISTRY) | ✅ | Dynamic discovery + "+ Add Panel" |
+| §8 Themes (8 themes, CSS variables, THEME message) | ✅ | Full theme sync |
+| §9 Layout presets (Minimal, Standard, Full, custom) | ✅ | Save/load/delete in localStorage + JSON file |
+| §10 Module structure | ✅ | Exact structure as specified |
+| §11 Bridge protocol | ✅ | All message types + extras (sessions, config) |
+| §14 Design principles (dumb shell, no build, sandbox) | ✅ | All 8 principles followed |
+| Panel min-size enforcement during drag | ⚠️ | CSS min 200×200px but no runtime clamp in resize handlers |
+| Dashboard-only mode (`mcp-cli dashboard --config`) | ❌ | Spec §2 "future, Phase 5" — not started |
+
+**Beyond spec:** The implementation added features not in the original spec: multi-modal attachments ("+" button, drag-drop, paste), plan-viewer view, tool-registry/browser view, config-panel view, agent-overview view, multi-agent router, session management (new/switch/delete/rename), and the full multi-agent spec (MULTI_AGENT_SPEC.md).
+
+### D2.1 Memory Panel
+
+Visual representation of the AI Virtual Memory subsystem (mirrors `/memory` command). The CLI already exposes working set stats, page table, per-page content, and full subsystem stats — the panel makes this visual and live.
+
+**New view:** `memory-panel.html`
+
+- **Summary gauges**: Working set utilization bar (tokens used / budget), L0/L1 page counts, page fault and eviction counters
+- **Page table**: Sortable table of all pages — ID, type (text/image/tool), tier (L0–L4), token count, pinned status, age in turns
+- **Page inspector**: Click a page to see content preview, creation turn, access history, eviction score
+- **Live metrics**: Page faults, evictions, TLB hit rate — updating in real time as conversation progresses
+- **Tier distribution**: Visual breakdown of pages across storage tiers (stacked bar or treemap)
+- **Budget pressure indicator**: Warning state when utilization >80%, critical at >95%
+- **Page lifecycle animation**: Visual indication when pages are faulted in, evicted, or migrated between tiers
+
+**Bridge changes:** New `on_memory_event()` hook called from VM subsystem on page fault, eviction, and tier migration. New `MEMORY_STATE` WebSocket message type for full state broadcast on connect. `MEMORY_EVENT` for incremental updates (fault, evict, migrate).
+
+**Shell integration:** New tab in shell.html, only visible when `--vm` flag is active (bridge advertises `vm_enabled` in CONFIG_STATE).
+
+**Data source:** `vm.working_set.get_stats()`, `vm.page_table.get_stats()`, `vm.page_table.entries` — same data the `/memory` command already reads.
+
+### D2.2 Token Usage Dashboard
+
+Live token economics — per-turn and cumulative cost tracking.
+
+**New view:** `token-usage.html`
+
+- **Per-turn bar chart**: Input/output tokens per turn, stacked bars
+- **Cumulative line**: Running total with estimated cost (provider-specific pricing)
+- **Rate limit gauge**: Visual indicator showing proximity to provider rate limits
+- **Model comparison**: When model is switched mid-session, show cost delta at the switch point
+- **Context window utilization**: How much of the model's context window is in use
+- **Export**: Download token usage report as CSV
+
+**Bridge changes:** Extend `CONVERSATION_MESSAGE` payload to include `usage` (input_tokens, output_tokens) when available. New `TOKEN_USAGE_HISTORY` aggregate message on connect for replay.
+
+### D2.3 Tool Execution Timeline
+
+Visual Gantt-style view of tool calls with timing and concurrency.
+
+**New view:** `tool-timeline.html`
+
+- **Gantt chart**: Horizontal bars showing tool call start → end, color-coded by server
+- **Concurrent calls**: Overlapping bars visible when tools run in parallel (plan batch execution)
+- **Drill-down**: Click a bar to see arguments, result preview, error details
+- **Timing stats**: Min/max/avg/p95 execution time per tool
+- **Server health**: Aggregate success rate and latency per server
+
+**Bridge changes:** Add `started_at` timestamp to tool call initiation (new `on_tool_call()` hook alongside existing `on_tool_result()`). Activity history pairs start + end for timeline rendering.
+
+### D2.4 Session Management Panel
+
+Manage conversation sessions entirely from the browser.
+
+**Backend status:** Bridge already handles `REQUEST_SESSIONS`, `LOAD_SESSION`, `SAVE_SESSION`, `DELETE_SESSION`, `RENAME_SESSION`, `NEW_SESSION`, `SWITCH_SESSION` — all wired to ChatContext. What's missing is a dedicated view UI.
+
+**New view or config-panel extension:**
+
+- **Session list**: Browse saved sessions with preview (first message, turn count, date, model used)
+- **Load session**: Click to load — replays conversation and activity history in all views
+- **Save session**: Manual save button with optional name
+- **Delete/rename session**: Manage old sessions
+- **Session comparison**: Side-by-side diff of two session transcripts
+- **Auto-save indicator**: Show when auto-save triggers, link to saved file
+
+### D2.5 Tool Approval UI
+
+Interactive tool approval from the browser when confirmation is required.
+
+**Backend status:** Bridge already has `request_tool_approval()` and `TOOL_APPROVAL_RESPONSE` handler with pending futures. What's missing is the frontend modal.
+
+- **Approval modal**: Shows tool name, arguments (syntax-highlighted JSON), server — approve/deny buttons
+- **Approval queue**: Multiple pending approvals shown as stacked cards with countdown timer
+- **Auto-approve toggle**: Per-tool or global toggle for trusted tools
+- **Audit trail**: Log of approved/denied tool calls with timestamps
+- **CLI fallback**: If no browser clients connected, falls back to CLI confirmation (already implemented)
+
+### D2.6 Inline Tool Execution
+
+Execute tools directly from the tool browser view.
+
+**Backend status:** `REQUEST_TOOL` message type already handled by bridge. Needs frontend form UI.
+
+- **Run button**: Each tool card gets a "Run" button
+- **Argument form**: Auto-generated from JSON schema (text inputs, number spinners, dropdowns for enums, textarea for objects, checkbox for booleans)
+- **Validation**: Client-side validation against schema before sending
+- **Result display**: Inline result rendering below the tool card (syntax-highlighted JSON)
+- **History**: Recent executions per tool with timing and success/failure indicators
+
+### D2.7 Export from Browser
+
+Download conversations and data directly from the dashboard.
+
+- **Markdown export**: Download formatted conversation as `.md` (reuse existing export logic)
+- **JSON export**: Download structured conversation with metadata as `.json`
+- **Activity log export**: Download tool call history as CSV
+- **Screenshot**: Capture current view as PNG (via browser Canvas API)
+
+**Bridge changes:** New `REQUEST_EXPORT` message type. Bridge calls existing export logic (`/export` command internals) and returns file content as download.
+
+### D2.8 Dashboard-Only Mode
+
+Run the dashboard without a CLI terminal — browser-first experience.
+
+```bash
+# Future: standalone dashboard mode
+mcp-cli dashboard --server sqlite --config workspace.yaml
+```
+
+- Dashboard opens as the primary interface (no terminal chat loop)
+- Agent terminal view is the sole conversation input
+- All `/commands` work through the browser input
+- Workspace configs define layout + servers + default views
+- Useful for: demos, shared screens, non-technical users, remote operation
+
+**Requires:** Decoupling the chat loop from terminal stdin — the input queue already supports this (browser messages go through `_input_queue`), but startup assumes terminal mode.
+
+### D2.9 MCP Apps as Dashboard Panels
+
+Embed MCP App UIs (tool `_meta.ui.resourceUri` web apps) as panels within the dashboard, with the ability to maximize into a full browser window.
+
+**Current state:** MCP Apps run on separate `AppHostServer` instances (ports 9470+) using JSON-RPC protocol. Dashboard runs on `DashboardServer` (port 9120+) with mcp-dashboard envelope protocol v2. The two systems are fully independent — apps open in standalone browser tabs.
+
+**Integration approach:** Keep WebSocket servers separate; embed app iframes inside dashboard panels pointing to their existing `localhost:947X` endpoints.
+
+- **Apps panel**: New dashboard view listing all running MCP apps with name, description, status, and "Open" button
+- **Inline embedding**: Clicking "Open" adds the app as a resizable iframe panel in the current layout (same panel system as existing views)
+- **Maximize / pop-out**: Each embedded app panel gets a maximize button (full dashboard area) and a pop-out button (⤢) to open in a standalone browser window — reuses the shell's existing pop-out mechanism
+- **Suppress standalone launch**: When `--dashboard` is active, tools with `_meta.ui.resourceUri` route to an embedded dashboard panel instead of opening a new browser tab
+- **Auto-placement**: New apps triggered by tool execution appear as panels in the current layout automatically, with focus
+- **Tool result routing**: Tool calls that return `_meta.ui.resourceUri` in their result metadata display the app inline in the activity stream with an "Open in panel" action
+- **Lifecycle management**: Apps panel shows running/stopped status; closing a panel doesn't kill the app server (can re-open)
+- **Multi-app support**: Multiple app panels can be open simultaneously in the dashboard layout
+
+**Bridge changes:** New `APP_OPENED` / `APP_CLOSED` / `APP_LIST` message types. Dashboard bridge tracks active `AppHostServer` instances and their ports. Shell.html manages app iframe lifecycle.
+
+**Requires:** D2.8 (Dashboard-Only Mode) benefits from this — apps become first-class dashboard citizens.
+
+### D2.10 Dashboard Polish
+
+Quality-of-life improvements.
+
+- **Runtime panel min-size enforcement**: Clamp resize drag handlers to 200×200px minimum (spec gap — CSS minimums exist but no JS enforcement)
+- **Theme sync**: Dashboard matches CLI `/theme` selection live (THEME message exists, needs CLI→bridge hook)
+- **Keyboard shortcuts**: `Ctrl+1/2/3` for tab switching, `Ctrl+N` to focus chat input, `Ctrl+Shift+F` for global search
+- **Background notifications**: Browser Notification API when agent completes while tab is in background
+- **Mobile-responsive**: Single-column layout for narrow screens (<768px), collapsible sidebar
+- **Message queue during disconnect**: Buffer outbound messages while WebSocket reconnects (reconnection backoff already implemented)
 
 ---
 
@@ -788,6 +1193,81 @@ mcp remote logs --follow
 - Read-only mode for auditors
 - Collaborative mode for pair-debugging agents
 
+## Code Review Fixes (Post-Audit)
+
+> **Goal:** Address findings from the comprehensive codebase review. Fixes organized by priority — high items are correctness/reliability, medium are consistency/maintainability, low are cleanup.
+
+### R.1 Add Logging to Remaining Silent Exception Blocks ✅
+
+**Problem:** 18 `except Exception: pass` blocks in commands/ and UI code lose error context entirely. The Tier 4 architecture audit fixed 6 in core modules; these are the remaining locations.
+
+**Files & Locations:**
+
+| File | Line | Context |
+|------|------|---------|
+| `commands/servers/ping.py` | 87-88 | Silent pass in ping check |
+| `commands/servers/health.py` | 68-69 | Silent pass in health check |
+| `commands/tokens/token.py` | 51-52 | Silent fallback to AUTO backend |
+| `commands/providers/providers.py` | 196-197 | Silent pass in provider status |
+| `commands/providers/providers.py` | 263-266 | Hardcoded error, missing logs |
+| `commands/providers/models.py` | 244-245 | Silent pass in Ollama discovery |
+| `commands/providers/models.py` | 286-287 | Silent pass in provider fetch |
+| `commands/providers/models.py` | 322-323 | Silent pass in API model fetch |
+| `commands/core/clear.py` | 91-99 | Nested silent passes |
+| `chat/tool_processor.py` | 634, 651, 686, 774 | Silent pass for UI errors |
+| `chat/tool_processor.py` | 914 | Silent pass for JSON parsing |
+| `chat/chat_handler.py` | 139-140 | Swallows tool count error |
+| `tools/manager.py` | 342-343 | Silent "non-critical" pass |
+| `config/discovery.py` | 212-213 | Returns False, loses error |
+
+**Action:** Add `logger.debug("context: %s", e)` to each block. Same pattern used in the 6 core fixes from Tier 4.
+
+### R.2 Delete Dead Code: `chat/__main__.py` ✅
+
+**Problem:** 196-line file marked dead in pyproject.toml coverage omit. Imports non-existent modules. Never executed.
+
+**File:** `src/mcp_cli/chat/__main__.py`
+
+**Action:** Delete the file. Remove from coverage omit in pyproject.toml.
+
+### R.3 Standardize Logger Variable Naming ✅
+
+**Problem:** 5 modules use `log = getLogger(__name__)` while the rest use `logger`. Inconsistent grep-ability.
+
+**Files:**
+- `apps/bridge.py` — `log`
+- `apps/host.py` — `log`
+- `chat/conversation.py` — `log`
+- `chat/tool_processor.py` — `log`
+- `commands/memory/memory.py` — `log`
+
+**Action:** Rename `log` → `logger` in these 5 files. Update all references.
+
+### R.4 Consolidate `constants/` Into `config/` ✅
+
+**Problem:** Two locations for project constants: `constants/__init__.py` (118 lines) and `config/defaults.py` + `config/enums.py`. Splits the single source of truth.
+
+**Action:** Move status values and enums from `constants/` to `config/enums.py` or `config/defaults.py`. Update imports. Delete `constants/` package.
+
+### R.5 Add Unit Tests for `core/model_resolver.py` ✅
+
+**Problem:** 178-line user-facing module with zero test coverage. Handles error display and model resolution fallback logic.
+
+**File:** `src/mcp_cli/core/model_resolver.py`
+
+**Action:** Create `tests/core/test_model_resolver.py` with tests for resolution paths, error handling, and fallback behavior.
+
+### R.6 Add Unit Tests for High-Risk Command Modules
+
+**Problem:** 48 command modules lack direct unit tests. Existing tests are end-to-end command usage tests that don't cover internal logic. Highest risk in large modules.
+
+**Priority files:**
+- `commands/tokens/token.py` (942 lines)
+- `commands/tools/execute_tool.py` (565 lines)
+- `commands/memory/memory.py` (538 lines)
+
+**Action:** Add targeted unit tests for complex internal logic in each module.
+
 ---
 
 ## Priority Summary
@@ -800,7 +1280,11 @@ mcp remote logs --follow
 | **3** | Performance & polish | Feels fast, saves work | ✅ Complete |
 | **4** | Code quality | Maintainable, testable | ✅ Complete |
 | **5** | Production hardening | Observable, auditable | ✅ Complete |
-| **6** | Plans & execution graphs | Reproducible workflows | High |
+| **VM** | AI Virtual Memory | OS-style context management | ✅ Complete (Experimental) |
+| **Review** | Code review fixes | Silent exceptions, dead code, test gaps | ✅ Complete |
+| **6** | Plans & execution graphs | Reproducible workflows | ✅ Complete (6.0–6.8) |
+| **Dashboard** | Dashboard & multi-modal | Real-time browser UI, file attachments | ✅ Complete |
+| **Dashboard v2** | Dashboard intelligence | Memory panel, token usage, tool timeline, session mgmt, approvals, MCP Apps panels, dashboard-only mode | High |
 | **7** | Observability & traces | Debugger for AI behavior | High |
 | **8** | Memory scopes | Long-running assistants | High |
 | **9** | Skills & capabilities | Portable behaviour layer | High |
@@ -812,7 +1296,7 @@ mcp remote logs --follow
 
 These change the category of the tool from **chat interface** to **agent operating system**:
 
-1. **Plans** (Tier 6) — reproducible, inspectable execution
+1. **Plans** (Tier 6) — reproducible, inspectable execution; model-driven planning (6.8) makes the model a self-orchestrating agent
 2. **Traces** (Tier 7) — explainable AI operations
 3. **Skills** (Tier 9) — portable, reusable behaviour (the npm for agents)
 4. **Scheduling** (Tier 10) — autonomous background agents

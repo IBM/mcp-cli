@@ -86,6 +86,7 @@ def register_all_commands() -> None:
         ServersCommand,
         ServerSingularCommand,
         PingCommand,
+        HealthCommand,
     )
     from mcp_cli.commands.providers import (
         ProviderCommand,
@@ -104,8 +105,12 @@ def register_all_commands() -> None:
     from mcp_cli.commands.conversation import ConversationCommand
     from mcp_cli.commands.usage import UsageCommand
     from mcp_cli.commands.export import ExportCommand
-    from mcp_cli.commands.sessions import SessionsCommand
+    from mcp_cli.commands.sessions import SessionsCommand, NewSessionCommand
     from mcp_cli.commands.apps import AppsCommand
+    from mcp_cli.commands.memory import MemoryCommand
+    from mcp_cli.commands.plan import PlanCommand
+    from mcp_cli.commands.cmd import CmdCommand
+    from mcp_cli.commands.attach import AttachCommand
 
     # Register basic commands
     registry.register(HelpCommand())
@@ -118,6 +123,7 @@ def register_all_commands() -> None:
     registry.register(ServersCommand())  # /servers - list all
 
     registry.register(PingCommand())
+    registry.register(HealthCommand())
     registry.register(ResourcesCommand())
     registry.register(PromptsCommand())
 
@@ -142,12 +148,24 @@ def register_all_commands() -> None:
     registry.register(UsageCommand())
     registry.register(ExportCommand())
     registry.register(SessionsCommand())
+    registry.register(NewSessionCommand())
 
     # Register tool execution command for interactive mode
     registry.register(ExecuteToolCommand())
 
     # Register MCP Apps command
     registry.register(AppsCommand())
+
+    # Register VM visualization command (chat mode only)
+    registry.register(MemoryCommand())
+
+    # Register plan command
+    registry.register(PlanCommand())
+
+    # Register cmd command (CLI-only)
+    registry.register(CmdCommand())
+    # Register attach command (multi-modal file staging)
+    registry.register(AttachCommand())
 
     # All commands have been migrated!
     # - tools (with subcommands: list, call, confirm)

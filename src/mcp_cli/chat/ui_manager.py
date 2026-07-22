@@ -230,8 +230,11 @@ class ChatUIManager:
         # The display manager shows tool name + arguments during execution
         pass
 
-    def do_confirm_tool_execution(self, tool_name: str, arguments: Any) -> bool:
+    async def do_confirm_tool_execution(self, tool_name: str, arguments: Any) -> bool:
         """Prompt user to confirm tool execution.
+
+        Routes to dashboard if browser clients are connected,
+        otherwise falls back to terminal prompt.
 
         Args:
             tool_name: Name of the tool
@@ -240,8 +243,6 @@ class ChatUIManager:
         Returns:
             True if user confirms, False otherwise
         """
-        from chuk_term.ui import output
-
         # Parse arguments for display
         if isinstance(arguments, str):
             try:
@@ -251,13 +252,35 @@ class ChatUIManager:
         else:
             args = arguments or {}
 
-        # Show tool and arguments
-        output.warning(f"⚠️  Tool confirmation required: {tool_name}")
+        # Route to dashboard if clients are connected
+        bridge = getattr(self.context, "dashboard_bridge", None)
+        if bridge is not None and bridge.has_clients:
+            try:
+                call_id = f"confirm-{id(arguments)}-{time.time_ns()}"
+                fut = await bridge.request_tool_approval(
+                    tool_name=tool_name,
+                    arguments=args,
+                    call_id=call_id,
+                )
+                # Wait for dashboard user to approve/deny (with timeout)
+                return await asyncio.wait_for(fut, timeout=300)
+            except asyncio.TimeoutError:
+                logger.warning("Tool approval timed out for %s", tool_name)
+                return False
+            except Exception as exc:
+                logger.warning("Dashboard tool approval error: %s", exc)
+                # Fall through to terminal prompt
+
+        # Terminal fallback
+        output.warning(f"Tool confirmation required: {tool_name}")
         args_str = json.dumps(args, indent=2) if isinstance(args, dict) else str(args)
         output.print(f"Parameters:\n{args_str}")
 
-        # Prompt for confirmation
-        response = input("\nExecute this tool? [Y/n]: ").strip().lower()
+        # Use asyncio-friendly prompt
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, lambda: input("\nExecute this tool? [Y/n]: ").strip().lower()
+        )
         return response in ("", "y", "yes")
 
     async def finish_tool_execution(

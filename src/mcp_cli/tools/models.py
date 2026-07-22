@@ -82,6 +82,10 @@ class ToolUIMeta(BaseModel):
     """
 
     resourceUri: str = Field(description="URI of the UI resource (ui:// scheme)")
+    viewUrl: str | None = Field(
+        default=None,
+        description="Direct HTTPS URL for the UI (preferred over resourceUri)",
+    )
     visibility: list[str] = Field(
         default_factory=lambda: ["model", "app"],
         description="Who can see/call this tool: 'model' and/or 'app'",
@@ -140,6 +144,13 @@ class ToolInfo(BaseModel):
         """Get the UI resource URI if available."""
         if self.meta and self.meta.ui:
             return self.meta.ui.resourceUri
+        return None
+
+    @property
+    def app_view_url(self) -> str | None:
+        """Get the direct view URL if available (fallback for resourceUri)."""
+        if self.meta and self.meta.ui:
+            return self.meta.ui.viewUrl
         return None
 
     @property

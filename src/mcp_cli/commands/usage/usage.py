@@ -49,15 +49,15 @@ Aliases: /tokens, /cost
         """Execute the usage command."""
         chat_context = kwargs.get("chat_context")
         if not chat_context:
-            return CommandResult(success=False, message="No chat context available.")
+            return CommandResult(success=False, error="No chat context available.")
 
         tracker = getattr(chat_context, "token_tracker", None)
         if tracker is None or tracker.turn_count == 0:
             output.info("No token usage recorded yet.")
-            return CommandResult(success=True, message="No usage data.")
+            return CommandResult(success=True, output="No usage data.")
 
         # Format summary
         summary = tracker.format_summary()
         output.panel(summary, title="Token Usage")
 
-        return CommandResult(success=True, message=summary)
+        return CommandResult(success=True, output=summary)

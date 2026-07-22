@@ -131,7 +131,10 @@ class HistoryMessage(BaseModel):
     role: MessageRole = Field(
         description="Message role (user, assistant, system, tool)"
     )
-    content: str | None = Field(default=None, description="Message content")
+    content: str | list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Message content (string, or list of content blocks for multimodal)",
+    )
     name: str | None = Field(default=None, description="Name (for tool messages)")
     tool_calls: list[dict[str, Any]] | None = Field(
         default=None, description="Tool calls (for assistant messages with tools)"
@@ -315,6 +318,9 @@ class ToolProcessorContext(Protocol):
     # Optional processor back-reference (set by ToolProcessor)
     tool_processor: Any  # Will be set to ToolProcessor instance
 
+    # Optional planning context (lazy-created by _handle_plan_tool)
+    _planning_context: Any
+
     def get_display_name_for_tool(self, tool_name: str) -> str:
         """Get display name for a tool (may be namespaced)."""
         ...
@@ -344,7 +350,7 @@ class UIManagerProtocol(Protocol):
         """Print tool call info to console."""
         ...
 
-    def do_confirm_tool_execution(
+    async def do_confirm_tool_execution(
         self,
         tool_name: str,
         arguments: dict[str, Any],
@@ -352,6 +358,7 @@ class UIManagerProtocol(Protocol):
         """Ask user to confirm tool execution.
 
         Returns True if user confirms, False otherwise.
+        May route to dashboard if browser clients are connected.
         """
         ...
 

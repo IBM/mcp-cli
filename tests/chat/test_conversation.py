@@ -1,6 +1,7 @@
 # tests/chat/test_conversation.py
 """Tests for ConversationProcessor."""
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -2048,3 +2049,1608 @@ class TestContextNoticesInjection:
 
         assert len(result) == 1
         assert result[0]["role"] == "user"
+
+
+# ----------------------------------------------------------
+# Tests for health polling (_health_poll_loop, _start_health_polling, _stop_health_polling)
+# ----------------------------------------------------------
+
+
+class TestHealthPolling:
+    """Tests for background health polling methods."""
+
+    def test_start_health_polling_when_interval_zero(self):
+        """When _health_interval is 0, no task is created."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        assert processor._health_interval == 0
+        processor._start_health_polling()
+        # No task should be created when interval is 0
+        assert processor._health_task is None
+
+    @pytest.mark.asyncio
+    async def test_start_health_polling_creates_task(self):
+        """When _health_interval > 0, a background task is created."""
+        context = MockContext()
+        # Give context a positive health interval
+        context._health_interval = 60
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 60  # Override directly
+
+        processor._start_health_polling()
+        try:
+            assert processor._health_task is not None
+            assert not processor._health_task.done()
+        finally:
+            # Clean up task
+            processor._health_task.cancel()
+            try:
+                await processor._health_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_start_health_polling_idempotent(self):
+        """Calling _start_health_polling twice does not create a second task."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 60
+
+        processor._start_health_polling()
+        first_task = processor._health_task
+
+        processor._start_health_polling()
+        second_task = processor._health_task
+
+        try:
+            assert first_task is second_task
+        finally:
+            if first_task:
+                first_task.cancel()
+                try:
+                    await first_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_stop_health_polling_cancels_task(self):
+        """_stop_health_polling cancels the task and clears the reference."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 60
+
+        processor._start_health_polling()
+        assert processor._health_task is not None
+
+        processor._stop_health_polling()
+        assert processor._health_task is None
+
+    def test_stop_health_polling_when_no_task(self):
+        """_stop_health_polling is a no-op when no task exists."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        assert processor._health_task is None
+        # Should not raise
+        processor._stop_health_polling()
+        assert processor._health_task is None
+
+    @pytest.mark.asyncio
+    async def test_health_poll_loop_no_tool_manager(self):
+        """Health poll loop continues without error when tool_manager is None."""
+        context = MockContext()
+        context.tool_manager = None  # No tool manager
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 0.01  # Very short interval
+
+        # Run the loop briefly and then cancel it
+        task = asyncio.create_task(processor._health_poll_loop())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_health_poll_loop_updates_status(self):
+        """Health poll loop updates _last_health from check_server_health results."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 0.01
+
+        # Set up tool_manager with check_server_health
+        context.tool_manager.check_server_health = AsyncMock(
+            return_value={"server1": {"status": "healthy"}}
+        )
+
+        task = asyncio.create_task(processor._health_poll_loop())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "server1" in processor._last_health
+        assert processor._last_health["server1"] == "healthy"
+
+    @pytest.mark.asyncio
+    async def test_health_poll_loop_logs_status_transition(self):
+        """Health poll loop logs warning when server status changes."""
+
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 0.01
+        # Pre-set previous status
+        processor._last_health = {"server1": "healthy"}
+
+        # Now it reports degraded
+        context.tool_manager.check_server_health = AsyncMock(
+            return_value={"server1": {"status": "degraded"}}
+        )
+
+        with patch("mcp_cli.chat.conversation.logger") as mock_logger:
+            task = asyncio.create_task(processor._health_poll_loop())
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # Should have logged a warning about status change
+        warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
+        assert any("health changed" in call for call in warning_calls)
+
+    @pytest.mark.asyncio
+    async def test_health_poll_loop_handles_exception(self):
+        """Health poll loop catches and logs generic exceptions."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 0.01
+
+        # check_server_health raises a non-cancelled exception
+        context.tool_manager.check_server_health = AsyncMock(
+            side_effect=RuntimeError("connection refused")
+        )
+
+        # Loop should not crash - it logs debug and continues
+        task = asyncio.create_task(processor._health_poll_loop())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_health_poll_loop_handles_none_info(self):
+        """Health poll loop handles None info entries gracefully."""
+        context = MockContext()
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 0.01
+
+        # Return None as info for a server
+        context.tool_manager.check_server_health = AsyncMock(
+            return_value={"server1": None}
+        )
+
+        task = asyncio.create_task(processor._health_poll_loop())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # status for None info should be "unknown"
+        assert processor._last_health.get("server1") == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_health_polling_started_and_stopped_during_process_conversation(self):
+        """process_conversation starts health polling at entry and stops it in finally."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="/help")]
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+        processor._health_interval = 0  # Keep at 0 to avoid real task creation
+
+        start_called = []
+        stop_called = []
+
+        original_start = processor._start_health_polling
+        original_stop = processor._stop_health_polling
+
+        def track_start():
+            start_called.append(True)
+            original_start()
+
+        def track_stop():
+            stop_called.append(True)
+            original_stop()
+
+        processor._start_health_polling = track_start
+        processor._stop_health_polling = track_stop
+
+        await processor.process_conversation()
+
+        assert len(start_called) == 1
+        assert len(stop_called) == 1
+
+
+# ----------------------------------------------------------
+# Tests for _record_token_usage
+# ----------------------------------------------------------
+
+
+class TestRecordTokenUsage:
+    """Tests for _record_token_usage method."""
+
+    def test_no_tracker_is_noop(self):
+        """When context has no token_tracker, record is skipped without error."""
+        context = MockContext()
+        # No token_tracker attribute
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        completion = CompletionResponse(
+            response="Hello",
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
+        )
+        # Should not raise
+        processor._record_token_usage(completion)
+
+    def test_records_with_usage_data(self):
+        """When usage data is present, a TurnUsage is created and recorded."""
+        context = MockContext()
+        mock_tracker = MagicMock()
+        context.token_tracker = mock_tracker
+        context.model = "gpt-4"
+        context.provider = "openai"
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        completion = CompletionResponse(
+            response="Hello",
+            usage={"prompt_tokens": 100, "completion_tokens": 50},
+        )
+        processor._record_token_usage(completion)
+
+        mock_tracker.record_turn.assert_called_once()
+        turn_arg = mock_tracker.record_turn.call_args[0][0]
+        assert turn_arg.input_tokens == 100
+        assert turn_arg.output_tokens == 50
+        assert turn_arg.model == "gpt-4"
+        assert turn_arg.provider == "openai"
+        assert not turn_arg.estimated
+
+    def test_records_with_input_output_tokens(self):
+        """Supports input_tokens/output_tokens as alternative to prompt/completion."""
+        context = MockContext()
+        mock_tracker = MagicMock()
+        context.token_tracker = mock_tracker
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        completion = CompletionResponse(
+            response="Hi",
+            usage={"input_tokens": 30, "output_tokens": 15},
+        )
+        processor._record_token_usage(completion)
+
+        mock_tracker.record_turn.assert_called_once()
+        turn_arg = mock_tracker.record_turn.call_args[0][0]
+        assert turn_arg.input_tokens == 30
+        assert turn_arg.output_tokens == 15
+
+    def test_estimates_when_no_usage_data(self):
+        """When usage is None, output tokens are estimated from response length."""
+        context = MockContext()
+        mock_tracker = MagicMock()
+        context.token_tracker = mock_tracker
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        completion = CompletionResponse(
+            response="Hello world, this is a test response!",
+            usage=None,
+        )
+        processor._record_token_usage(completion)
+
+        mock_tracker.record_turn.assert_called_once()
+        turn_arg = mock_tracker.record_turn.call_args[0][0]
+        assert turn_arg.estimated is True
+        assert turn_arg.output_tokens >= 1
+
+    def test_estimates_empty_response(self):
+        """When usage is None and response is empty string, estimation still works."""
+        context = MockContext()
+        mock_tracker = MagicMock()
+        context.token_tracker = mock_tracker
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        completion = CompletionResponse(
+            response="",
+            usage=None,
+        )
+        processor._record_token_usage(completion)
+
+        mock_tracker.record_turn.assert_called_once()
+        turn_arg = mock_tracker.record_turn.call_args[0][0]
+        assert turn_arg.estimated is True
+
+
+# ----------------------------------------------------------
+# Tests for VM turn advance (line 182)
+# ----------------------------------------------------------
+
+
+class TestVMTurnAdvance:
+    """Tests for vm.new_turn() call at start of process_conversation."""
+
+    @pytest.mark.asyncio
+    async def test_vm_new_turn_called_when_vm_present(self):
+        """vm.new_turn() is called when context has a session with a vm."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="/help")]
+
+        # Set up a session with a vm
+        mock_vm = MagicMock()
+        mock_session = MagicMock()
+        mock_session.vm = mock_vm
+        context.session = mock_session
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        await processor.process_conversation()
+
+        mock_vm.new_turn.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_vm_new_turn_skipped_when_no_session(self):
+        """vm.new_turn() is not called when no session attribute exists."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="/help")]
+        # No session attribute
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        # Should not raise
+        await processor.process_conversation()
+
+
+# ----------------------------------------------------------
+# Tests for streaming fallback (lines 258-269)
+# ----------------------------------------------------------
+
+
+class TestStreamingFallbackCoverage:
+    """Tests for the streaming-to-regular-completion fallback path."""
+
+    @pytest.mark.asyncio
+    async def test_streaming_exception_causes_fallback(self):
+        """When _handle_streaming_completion raises, regular completion is used."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        # Client supports streaming (has create_completion with stream param)
+        mock_client = MagicMock()
+        mock_client.create_completion = AsyncMock(
+            return_value={"response": "Regular fallback", "tool_calls": []}
+        )
+        context.client = mock_client
+
+        ui_manager = MockUIManager()
+        ui_manager.start_streaming_response = AsyncMock()
+        ui_manager.stop_streaming_response = AsyncMock()
+        ui_manager.print_assistant_message = AsyncMock()
+        ui_manager.display = MagicMock()
+        ui_manager.is_streaming_response = False
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        processor._tool_state = mock_tool_state
+
+        # Make streaming fail
+        streaming_exception = Exception("Streaming failed")
+
+        async def failing_streaming(tools=None, after_tool_calls=False):
+            raise streaming_exception
+
+        processor._handle_streaming_completion = failing_streaming
+
+        await processor.process_conversation(max_turns=1)
+
+        # Regular completion should have been used as fallback
+        mock_client.create_completion.assert_called_once()
+
+
+# ----------------------------------------------------------
+# Tests for discovery budget with streaming active (lines 342-346)
+# ----------------------------------------------------------
+
+
+class TestDiscoveryBudgetWithStreaming:
+    """Tests for discovery budget path when streaming UI is active."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_budget_stops_streaming(self):
+        """Discovery budget exhaustion stops active streaming UI."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Search")
+        ]
+        context.openai_tools = []
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="search", arguments="{}"),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming is active!
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        mock_status = RunawayStatus(
+            should_stop=True,
+            reason="Discovery budget exhausted",
+            budget_exhausted=True,
+        )
+        mock_status_ok = RunawayStatus(should_stop=False)
+
+        call_count = [0]
+
+        def mock_check(tool_name=None):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return mock_status
+            return mock_status_ok
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=True)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=False)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        mock_tool_state.format_discovery_exhausted_message = MagicMock(
+            return_value="Discovery exhausted"
+        )
+        mock_tool_state.check_runaway = MagicMock(side_effect=mock_check)
+        processor._tool_state = mock_tool_state
+
+        context.client.create_completion = AsyncMock(
+            side_effect=[
+                {"response": "", "tool_calls": [tool_call.model_dump()]},
+                {"response": "Final answer", "tool_calls": []},
+            ]
+        )
+
+        await processor.process_conversation(max_turns=3)
+
+        # stop_streaming_response should have been called
+        ui_manager.stop_streaming_response.assert_called()
+        # streaming_handler should be cleared
+        assert ui_manager.streaming_handler is None
+
+
+# ----------------------------------------------------------
+# Tests for execution budget with streaming active (lines 363-367)
+# ----------------------------------------------------------
+
+
+class TestExecutionBudgetWithStreaming:
+    """Tests for execution budget path when streaming UI is active."""
+
+    @pytest.mark.asyncio
+    async def test_execution_budget_stops_streaming(self):
+        """Execution budget exhaustion stops active streaming UI."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Execute")
+        ]
+        context.openai_tools = []
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="execute", arguments="{}"),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming is active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        mock_status_exec = RunawayStatus(
+            should_stop=True,
+            reason="Execution budget exhausted",
+            budget_exhausted=True,
+        )
+        mock_status_ok = RunawayStatus(should_stop=False)
+
+        def mock_check(tool_name=None):
+            if tool_name is not None:
+                return mock_status_exec
+            return mock_status_ok
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=False)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=True)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        mock_tool_state.format_execution_exhausted_message = MagicMock(
+            return_value="Execution exhausted"
+        )
+        mock_tool_state.check_runaway = MagicMock(side_effect=mock_check)
+        processor._tool_state = mock_tool_state
+
+        context.client.create_completion = AsyncMock(
+            side_effect=[
+                {"response": "", "tool_calls": [tool_call.model_dump()]},
+                {"response": "Done", "tool_calls": []},
+            ]
+        )
+
+        await processor.process_conversation(max_turns=3)
+
+        # stop_streaming_response should have been called
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+
+# ----------------------------------------------------------
+# Tests for general runaway with streaming active (lines 399-406)
+# ----------------------------------------------------------
+
+
+class TestGeneralRunawayWithStreaming:
+    """Tests for general runaway detection with streaming UI active."""
+
+    @pytest.mark.asyncio
+    async def test_runaway_stops_streaming_ui(self):
+        """General runaway detection stops streaming UI."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Compute")
+        ]
+        context.openai_tools = []
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="compute", arguments="{}"),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming is active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        mock_runaway = RunawayStatus(
+            should_stop=True,
+            reason="General runaway",
+            budget_exhausted=False,
+            saturation_detected=False,
+        )
+        mock_ok = RunawayStatus(should_stop=False)
+
+        # No discovery/execution tools — first check_runaway() call (tool_name=None)
+        # is the general runaway check; trigger it immediately.
+        def mock_check(tool_name=None):
+            if tool_name is None:
+                return mock_runaway
+            return mock_ok
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=False)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=False)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        mock_tool_state.format_state_for_model = MagicMock(return_value="State")
+        mock_tool_state.check_runaway = MagicMock(side_effect=mock_check)
+        processor._tool_state = mock_tool_state
+        # Mock tool processor to avoid UI issues
+        processor.tool_processor.process_tool_calls = AsyncMock()
+
+        context.client.create_completion = AsyncMock(
+            side_effect=[
+                {"response": "", "tool_calls": [tool_call.model_dump()]},
+                {"response": "Final answer", "tool_calls": []},
+            ]
+        )
+
+        await processor.process_conversation(max_turns=3)
+
+        ui_manager.stop_streaming_response.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_runaway_other_reason_uses_format_state(self):
+        """Runaway with neither budget_exhausted nor saturation uses format_state_for_model."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Compute")
+        ]
+        context.openai_tools = []
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="compute", arguments="{}"),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = False
+        ui_manager.stop_streaming_response = AsyncMock()
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        # Create runaway that's neither budget_exhausted nor saturation_detected.
+        # Since is_discovery_tool=False and is_execution_tool=False, there are no
+        # per-type budget checks — so the first check_runaway() call is the general
+        # runaway check (called with no tool_name / tool_name=None).
+        mock_runaway = RunawayStatus(
+            should_stop=True,
+            reason="Unusual runaway condition",
+            budget_exhausted=False,
+            saturation_detected=False,
+        )
+        mock_ok = RunawayStatus(should_stop=False)
+
+        call_count = [0]
+
+        def mock_check(tool_name=None):
+            call_count[0] += 1
+            # General check is called with no args (tool_name=None).
+            # Since there are no discovery/execution tools in this test,
+            # the first call to check_runaway is always the general one.
+            if tool_name is None:
+                return mock_runaway
+            return mock_ok
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=False)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=False)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        mock_tool_state.format_state_for_model = MagicMock(
+            return_value="Computed state"
+        )
+        mock_tool_state.check_runaway = MagicMock(side_effect=mock_check)
+        processor._tool_state = mock_tool_state
+        # Mock tool processor to avoid UI issues
+        processor.tool_processor.process_tool_calls = AsyncMock()
+
+        context.client.create_completion = AsyncMock(
+            side_effect=[
+                {"response": "", "tool_calls": [tool_call.model_dump()]},
+                {"response": "Done", "tool_calls": []},
+            ]
+        )
+
+        await processor.process_conversation(max_turns=3)
+
+        # format_state_for_model used in the "else" branch stop message
+        mock_tool_state.format_state_for_model.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_saturation_with_empty_numeric_results(self):
+        """Saturation with no numeric results uses 0.0 as last_val."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Compute")
+        ]
+        context.openai_tools = []
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="compute", arguments="{}"),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = False
+        ui_manager.stop_streaming_response = AsyncMock()
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        # Saturation runaway — no discovery/execution tools, so the first
+        # call to check_runaway() (general check, tool_name=None) triggers it.
+        mock_runaway = RunawayStatus(
+            should_stop=True,
+            reason="Saturation detected",
+            budget_exhausted=False,
+            saturation_detected=True,
+        )
+        mock_ok = RunawayStatus(should_stop=False)
+
+        def mock_check(tool_name=None):
+            if tool_name is None:
+                return mock_runaway
+            return mock_ok
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=False)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=False)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        # Empty numeric results — should use 0.0 as fallback
+        mock_tool_state._recent_numeric_results = []
+        mock_tool_state.format_saturation_message = MagicMock(
+            return_value="Saturation message"
+        )
+        mock_tool_state.check_runaway = MagicMock(side_effect=mock_check)
+        processor._tool_state = mock_tool_state
+        # Mock tool processor to avoid UI issues
+        processor.tool_processor.process_tool_calls = AsyncMock()
+
+        context.client.create_completion = AsyncMock(
+            side_effect=[
+                {"response": "", "tool_calls": [tool_call.model_dump()]},
+                {"response": "Done", "tool_calls": []},
+            ]
+        )
+
+        await processor.process_conversation(max_turns=3)
+
+        # format_saturation_message should have been called with 0.0
+        mock_tool_state.format_saturation_message.assert_called_with(0.0)
+
+
+# ----------------------------------------------------------
+# Tests for max_turns with streaming active (lines 417-421)
+# ----------------------------------------------------------
+
+
+class TestMaxTurnsWithStreaming:
+    """Tests for max_turns limit when streaming is active."""
+
+    @pytest.mark.asyncio
+    async def test_max_turns_stops_streaming(self):
+        """Max turns stops active streaming UI before breaking."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Loop")]
+        context.openai_tools = []
+        context.tool_name_mapping = {}
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="loop", arguments="{}"),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=False)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=False)
+        mock_tool_state.check_runaway = MagicMock(
+            return_value=RunawayStatus(should_stop=False)
+        )
+        processor._tool_state = mock_tool_state
+        processor.tool_processor.process_tool_calls = AsyncMock()
+
+        context.client.create_completion = AsyncMock(
+            return_value={"response": "", "tool_calls": [tool_call.model_dump()]}
+        )
+
+        # max_turns=1 means turn_count will equal max_turns after first tool call
+        await processor.process_conversation(max_turns=1)
+
+        # Should have attempted to stop streaming
+        ui_manager.stop_streaming_response.assert_called()
+
+
+# ----------------------------------------------------------
+# Tests for consecutive duplicate with streaming (lines 471-474)
+# ----------------------------------------------------------
+
+
+class TestDuplicateDetectionWithStreaming:
+    """Tests for duplicate tool call detection when streaming is active."""
+
+    @pytest.mark.asyncio
+    async def test_max_duplicates_stops_streaming(self):
+        """Max consecutive duplicates stops active streaming UI before breaking."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Calculate")
+        ]
+        context.openai_tools = []
+        context.tool_name_mapping = {}
+
+        tool_call = ToolCall(
+            id="call_1",
+            type="function",
+            function=FunctionCall(name="sqrt", arguments='{"x": 16}'),
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+        processor._max_consecutive_duplicates = 2
+
+        from chuk_ai_session_manager.guards import RunawayStatus
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.is_discovery_tool = MagicMock(return_value=False)
+        mock_tool_state.is_execution_tool = MagicMock(return_value=False)
+        mock_tool_state.format_state_for_model = MagicMock(return_value="")
+        mock_tool_state.check_runaway = MagicMock(
+            return_value=RunawayStatus(should_stop=False)
+        )
+        processor._tool_state = mock_tool_state
+        processor.tool_processor.process_tool_calls = AsyncMock()
+
+        context.client.create_completion = AsyncMock(
+            return_value={"response": "", "tool_calls": [tool_call.model_dump()]}
+        )
+
+        await processor.process_conversation(max_turns=20)
+
+        # Should have stopped and streaming should have been stopped
+        ui_manager.stop_streaming_response.assert_called()
+
+
+# ----------------------------------------------------------
+# Tests for error handlers with streaming active (lines 580-620)
+# ----------------------------------------------------------
+
+
+class TestErrorHandlersWithStreaming:
+    """Tests for exception handlers that stop streaming before breaking."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_stops_streaming(self):
+        """asyncio.TimeoutError stops streaming UI and breaks loop."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=asyncio.TimeoutError("Request timed out")
+        )
+
+        await processor.process_conversation(max_turns=1)
+
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_injects_message(self):
+        """asyncio.TimeoutError injects timeout message to conversation."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = False
+        ui_manager.stop_streaming_response = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=asyncio.TimeoutError("timed out")
+        )
+
+        await processor.process_conversation(max_turns=1)
+
+        # Check for injected timeout message
+        [
+            m
+            for m in context.conversation_history
+            if isinstance(m, str)
+            and "timed out" in m.lower()
+            or (
+                hasattr(m, "content") and m.content and "timed out" in m.content.lower()
+            )
+        ]
+        # inject_assistant_message puts a string, not a Message object
+        all_msgs = context.conversation_history
+        assert any(
+            (isinstance(m, str) and "timed out" in m.lower())
+            or (
+                hasattr(m, "content") and m.content and "timed out" in m.content.lower()
+            )
+            for m in all_msgs
+        )
+
+    @pytest.mark.asyncio
+    async def test_connection_error_stops_streaming(self):
+        """ConnectionError stops streaming UI and breaks loop."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=ConnectionError("Connection refused")
+        )
+
+        await processor.process_conversation(max_turns=1)
+
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+    @pytest.mark.asyncio
+    async def test_os_error_stops_streaming(self):
+        """OSError (subclass of ConnectionError path) stops streaming UI."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(side_effect=OSError("Broken pipe"))
+
+        await processor.process_conversation(max_turns=1)
+
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+    @pytest.mark.asyncio
+    async def test_connection_error_injects_message(self):
+        """ConnectionError injects connectivity message to conversation."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = False
+        ui_manager.stop_streaming_response = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=ConnectionError("Connection refused")
+        )
+
+        await processor.process_conversation(max_turns=1)
+
+        all_msgs = context.conversation_history
+        assert any(
+            (isinstance(m, str) and "connection" in m.lower())
+            or (
+                hasattr(m, "content")
+                and m.content
+                and "connection" in m.content.lower()
+            )
+            for m in all_msgs
+        )
+
+    @pytest.mark.asyncio
+    async def test_value_error_stops_streaming(self):
+        """ValueError stops streaming UI and breaks loop without injecting message."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=ValueError("Invalid configuration")
+        )
+
+        initial_len = len(context.conversation_history)
+        await processor.process_conversation(max_turns=1)
+
+        # ValueError handler does not inject a message (no inject_assistant_message call)
+        assert len(context.conversation_history) == initial_len
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+    @pytest.mark.asyncio
+    async def test_type_error_stops_streaming(self):
+        """TypeError stops streaming UI and breaks loop without injecting message."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=TypeError("Wrong type")
+        )
+
+        await processor.process_conversation(max_turns=1)
+
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+    @pytest.mark.asyncio
+    async def test_general_exception_stops_streaming(self):
+        """Generic Exception stops streaming UI and injects error message."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = True  # Streaming active
+        ui_manager.stop_streaming_response = AsyncMock(
+            side_effect=lambda: setattr(ui_manager, "is_streaming_response", False)
+        )
+        ui_manager.streaming_handler = MagicMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        context.client.create_completion = AsyncMock(
+            side_effect=RuntimeError("Something unexpected")
+        )
+
+        await processor.process_conversation(max_turns=1)
+
+        ui_manager.stop_streaming_response.assert_called()
+        assert ui_manager.streaming_handler is None
+
+        # General exception injects error message
+        all_msgs = context.conversation_history
+        assert any(
+            (isinstance(m, str) and "error" in m.lower())
+            or (hasattr(m, "content") and m.content and "error" in m.content.lower())
+            for m in all_msgs
+        )
+
+
+# ----------------------------------------------------------
+# Tests for _handle_streaming_completion (lines 641-680)
+# ----------------------------------------------------------
+
+
+class TestHandleStreamingCompletionDirect:
+    """Tests for _handle_streaming_completion method directly."""
+
+    @pytest.mark.asyncio
+    async def test_streaming_completion_returns_completion_response(self):
+        """_handle_streaming_completion returns a CompletionResponse."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        ui_manager = MockUIManager()
+        ui_manager.start_streaming_response = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        mock_stream_result = {
+            "response": "Streaming response",
+            "tool_calls": None,
+            "streaming": True,
+            "elapsed_time": 1.5,
+        }
+
+        with patch(
+            "mcp_cli.chat.streaming_handler.StreamingResponseHandler"
+        ) as MockHandler:
+            mock_handler_instance = MagicMock()
+            mock_handler_instance.stream_response = AsyncMock(
+                return_value=mock_stream_result
+            )
+            MockHandler.return_value = mock_handler_instance
+
+            result = await processor._handle_streaming_completion(tools=[])
+
+        assert isinstance(result, CompletionResponse)
+        assert result.response == "Streaming response"
+        assert result.streaming is True
+
+    @pytest.mark.asyncio
+    async def test_streaming_completion_with_tool_calls(self):
+        """_handle_streaming_completion logs tool calls when present."""
+        context = MockContext()
+        context.conversation_history = [
+            Message(role=MessageRole.USER, content="Use a tool")
+        ]
+        ui_manager = MockUIManager()
+        ui_manager.start_streaming_response = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        tool_call_dict = {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "sqrt", "arguments": '{"x": 4}'},
+        }
+
+        mock_stream_result = {
+            "response": "",
+            "tool_calls": [tool_call_dict],
+            "streaming": True,
+            "elapsed_time": 0.8,
+        }
+
+        with patch(
+            "mcp_cli.chat.streaming_handler.StreamingResponseHandler"
+        ) as MockHandler:
+            mock_handler_instance = MagicMock()
+            mock_handler_instance.stream_response = AsyncMock(
+                return_value=mock_stream_result
+            )
+            MockHandler.return_value = mock_handler_instance
+
+            result = await processor._handle_streaming_completion(tools=[])
+
+        assert isinstance(result, CompletionResponse)
+
+    @pytest.mark.asyncio
+    async def test_streaming_completion_sets_handler_on_ui_manager(self):
+        """_handle_streaming_completion sets streaming_handler on ui_manager."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        ui_manager = MockUIManager()
+        ui_manager.start_streaming_response = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        mock_stream_result = {
+            "response": "Done",
+            "tool_calls": None,
+        }
+
+        with patch(
+            "mcp_cli.chat.streaming_handler.StreamingResponseHandler"
+        ) as MockHandler:
+            mock_handler_instance = MagicMock()
+            mock_handler_instance.stream_response = AsyncMock(
+                return_value=mock_stream_result
+            )
+            MockHandler.return_value = mock_handler_instance
+
+            await processor._handle_streaming_completion(tools=[])
+
+        # Handler should be set on ui_manager
+        assert ui_manager.streaming_handler == mock_handler_instance
+
+    @pytest.mark.asyncio
+    async def test_streaming_completion_after_tool_calls_flag(self):
+        """_handle_streaming_completion passes after_tool_calls to stream_response."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        ui_manager = MockUIManager()
+        ui_manager.start_streaming_response = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        mock_stream_result = {"response": "Done", "tool_calls": None}
+
+        with patch(
+            "mcp_cli.chat.streaming_handler.StreamingResponseHandler"
+        ) as MockHandler:
+            mock_handler_instance = MagicMock()
+            mock_handler_instance.stream_response = AsyncMock(
+                return_value=mock_stream_result
+            )
+            MockHandler.return_value = mock_handler_instance
+
+            await processor._handle_streaming_completion(
+                tools=[], after_tool_calls=True
+            )
+
+        # stream_response should have been called with after_tool_calls=True
+        mock_handler_instance.stream_response.assert_called_once()
+        call_kwargs = mock_handler_instance.stream_response.call_args[1]
+        assert call_kwargs.get("after_tool_calls") is True
+
+
+# ----------------------------------------------------------
+# Tests for _load_tools VM and memory tool injection (lines 758-780)
+# ----------------------------------------------------------
+
+
+class TestLoadToolsVMAndMemory:
+    """Tests for VM tool and memory tool injection in _load_tools."""
+
+    @pytest.mark.asyncio
+    async def test_vm_tools_injected_when_vm_active(self):
+        """When session has a VM in non-passive mode, VM tools are injected."""
+        context = MockContext()
+        context.openai_tools = [{"type": "function", "function": {"name": "base_tool"}}]
+
+        # Set up a VM in strict mode
+        mock_vm = MagicMock()
+        mock_vm.mode.value = "strict"
+        mock_session = MagicMock()
+        mock_session.vm = mock_vm
+        context.session = mock_session
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        vm_tool = {"type": "function", "function": {"name": "vm_tool"}}
+
+        with patch(
+            "chuk_ai_session_manager.memory.vm_prompts.get_vm_tools_as_dicts",
+            return_value=[vm_tool],
+        ):
+            await processor._load_tools()
+
+        # VM tool should have been added
+        tool_names = [t["function"]["name"] for t in context.openai_tools]
+        assert "vm_tool" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_vm_tools_not_injected_in_passive_mode(self):
+        """When VM is in passive mode, VM tools are not injected."""
+        context = MockContext()
+        context.openai_tools = [{"type": "function", "function": {"name": "base_tool"}}]
+
+        mock_vm = MagicMock()
+        mock_vm.mode.value = "passive"
+        mock_session = MagicMock()
+        mock_session.vm = mock_vm
+        context.session = mock_session
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        with patch(
+            "chuk_ai_session_manager.memory.vm_prompts.get_vm_tools_as_dicts",
+            return_value=[{"type": "function", "function": {"name": "vm_tool"}}],
+        ) as mock_get:
+            await processor._load_tools()
+
+        # VM tool should NOT have been fetched for passive mode
+        mock_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_vm_tools_not_injected_when_no_session(self):
+        """When no session is present, VM tools are not injected."""
+        context = MockContext()
+        context.openai_tools = []
+        # No session attribute
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        with patch(
+            "chuk_ai_session_manager.memory.vm_prompts.get_vm_tools_as_dicts",
+            return_value=[{"type": "function", "function": {"name": "vm_tool"}}],
+        ) as mock_get:
+            await processor._load_tools()
+
+        mock_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_vm_tools_error_is_caught(self):
+        """When VM tool loading raises, it logs a warning and continues."""
+        context = MockContext()
+        context.openai_tools = []
+
+        mock_vm = MagicMock()
+        mock_vm.mode.value = "strict"
+        mock_session = MagicMock()
+        mock_session.vm = mock_vm
+        context.session = mock_session
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        with patch(
+            "chuk_ai_session_manager.memory.vm_prompts.get_vm_tools_as_dicts",
+            side_effect=ImportError("Not available"),
+        ):
+            # Should not raise
+            await processor._load_tools()
+
+    @pytest.mark.asyncio
+    async def test_memory_tools_injected_when_store_present(self):
+        """When context has memory_store, memory tools are injected."""
+        context = MockContext()
+        context.openai_tools = []
+        context.memory_store = MagicMock()  # Has a memory store
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        memory_tool = {"type": "function", "function": {"name": "mem_tool"}}
+
+        with patch(
+            "mcp_cli.memory.tools.get_memory_tools_as_dicts",
+            return_value=[memory_tool],
+        ):
+            await processor._load_tools()
+
+        tool_names = [t["function"]["name"] for t in context.openai_tools]
+        assert "mem_tool" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_memory_tools_not_injected_when_no_store(self):
+        """When context has no memory_store, memory tools are not injected."""
+        context = MockContext()
+        context.openai_tools = []
+        # No memory_store attribute
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        with patch(
+            "mcp_cli.memory.tools.get_memory_tools_as_dicts",
+            return_value=[{"type": "function", "function": {"name": "mem_tool"}}],
+        ) as mock_get:
+            await processor._load_tools()
+
+        mock_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_memory_tools_error_is_caught(self):
+        """When memory tool loading raises, it logs a warning and continues."""
+        context = MockContext()
+        context.openai_tools = []
+        context.memory_store = MagicMock()
+
+        ui_manager = MockUIManager()
+        processor = ConversationProcessor(context, ui_manager)
+
+        with patch(
+            "mcp_cli.memory.tools.get_memory_tools_as_dicts",
+            side_effect=ImportError("memory not available"),
+        ):
+            # Should not raise
+            await processor._load_tools()
+
+
+# ----------------------------------------------------------
+# Tests for auto_save_check (line 573)
+# ----------------------------------------------------------
+
+
+class TestAutoSaveCheck:
+    """Tests for auto_save_check call after adding assistant message."""
+
+    @pytest.mark.asyncio
+    async def test_auto_save_check_called_when_present(self):
+        """auto_save_check is called when context has the method."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+
+        auto_save_called = []
+
+        def mock_auto_save():
+            auto_save_called.append(True)
+
+        context.auto_save_check = mock_auto_save
+
+        context.client.create_completion = AsyncMock(
+            return_value={"response": "Hi!", "tool_calls": []}
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = False
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        processor._tool_state = mock_tool_state
+
+        await processor.process_conversation(max_turns=1)
+
+        assert len(auto_save_called) == 1
+
+    @pytest.mark.asyncio
+    async def test_auto_save_check_skipped_when_absent(self):
+        """When context lacks auto_save_check, no error is raised."""
+        context = MockContext()
+        context.conversation_history = [Message(role=MessageRole.USER, content="Hello")]
+        context.openai_tools = []
+        # No auto_save_check attribute
+
+        context.client.create_completion = AsyncMock(
+            return_value={"response": "Hi!", "tool_calls": []}
+        )
+
+        ui_manager = MockUIManager()
+        ui_manager.is_streaming_response = False
+        ui_manager.print_assistant_message = AsyncMock()
+
+        processor = ConversationProcessor(context, ui_manager)
+
+        mock_tool_state = MagicMock()
+        mock_tool_state.reset_for_new_prompt = MagicMock()
+        mock_tool_state.register_user_literals = MagicMock(return_value=0)
+        mock_tool_state.extract_bindings_from_text = MagicMock(return_value=[])
+        mock_tool_state.format_unused_warning = MagicMock(return_value=None)
+        processor._tool_state = mock_tool_state
+
+        # Should not raise
+        await processor.process_conversation(max_turns=1)
+
+
+# ----------------------------------------------------------
+# Tests for _validate_tool_messages with non-dict tool_calls (line 886->880)
+# ----------------------------------------------------------
+
+
+class TestValidateToolMessagesObjectToolCalls:
+    """Tests for _validate_tool_messages with object (non-dict) tool_calls."""
+
+    def test_tool_calls_as_objects_with_id_attr(self):
+        """Tool calls as objects (with id attribute) are handled correctly."""
+        # Simulate a ToolCall-like object instead of a dict
+        mock_tc = MagicMock()
+        mock_tc.get = MagicMock(side_effect=AttributeError("not a dict"))
+        # The code checks isinstance(tc, dict) first; if not dict, uses getattr(tc, "id")
+        mock_tc.id = "call_obj_1"
+
+        messages = [
+            {"role": "user", "content": "Do something"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [mock_tc],  # Object, not dict
+            },
+            # No tool result
+        ]
+
+        result = ConversationProcessor._validate_tool_messages(messages)
+
+        # Should have inserted a placeholder
+        assert len(result) == 3
+        assert result[2]["role"] == "tool"
+        assert result[2]["tool_call_id"] == "call_obj_1"
+
+    def test_tool_call_with_no_id(self):
+        """Tool calls without an id are skipped in expected_ids collection."""
+        messages = [
+            {"role": "user", "content": "Do something"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {"name": "foo", "arguments": "{}"},
+                        # No "id" key!
+                    }
+                ],
+            },
+            {"role": "assistant", "content": "Done."},
+        ]
+
+        result = ConversationProcessor._validate_tool_messages(messages)
+
+        # No id means nothing to check — messages unchanged
+        assert len(result) == 3
+
+    def test_tool_message_without_tool_call_id(self):
+        """Tool messages without tool_call_id are not added to found_ids."""
+        messages = [
+            {"role": "user", "content": "Go"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {"name": "t", "arguments": "{}"},
+                    }
+                ],
+            },
+            # Tool message but without tool_call_id
+            {"role": "tool", "content": "Result"},
+        ]
+
+        result = ConversationProcessor._validate_tool_messages(messages)
+
+        # "call_abc" is not found in found_ids, so a placeholder is inserted
+        assert any(
+            m.get("tool_call_id") == "call_abc"
+            and "did not complete" in m.get("content", "")
+            for m in result
+        )

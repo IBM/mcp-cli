@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity Stream</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+:root {
+  --dash-bg: #1e1e2e; --dash-bg-surface: #262637; --dash-bg-hover: #2e2e42;
+  --dash-fg: #e0e0e0; --dash-fg-muted: #888899;
+  --dash-accent: #7aa2f7; --dash-success: #9ece6a; --dash-warning: #e0af68;
+  --dash-error: #f7768e; --dash-info: #7dcfff; --dash-border: #3b3b52;
+  --dash-font-mono: 'JetBrains Mono','Fira Code',monospace;
+  --dash-font-ui: 'Inter',-apple-system,sans-serif;
+  --dash-font-size: 13px; --dash-radius: 6px; --dash-spacing: 8px;
+}
+body {
+  background: var(--dash-bg);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-ui);
+  font-size: var(--dash-font-size);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Filter bar */
+#filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--dash-bg-surface);
+  border-bottom: 1px solid var(--dash-border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+#filter-bar input, #filter-bar select {
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  color: var(--dash-fg);
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--dash-font-ui);
+}
+#filter-bar input { flex: 1; min-width: 80px; }
+
+/* Event list */
+#events {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#events::-webkit-scrollbar { width: 6px; }
+#events::-webkit-scrollbar-track { background: transparent; }
+#events::-webkit-scrollbar-thumb { background: var(--dash-border); border-radius: 3px; }
+
+/* Event card */
+.event-card {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-left-width: 3px;
+}
+.event-card:hover { background: var(--dash-bg-hover); }
+.event-card.tool-ok    { border-left-color: var(--dash-accent); }
+.event-card.tool-err   { border-left-color: var(--dash-error); }
+.event-card.state-chg  { border-left-color: var(--dash-fg-muted); }
+.event-card.user-act   { border-left-color: var(--dash-success); }
+.event-card.thinking   { border-left-color: var(--dash-warning); }
+.event-card.plan-run   { border-left-color: var(--dash-info); }
+.event-card.plan-done  { border-left-color: var(--dash-success); }
+.event-card.plan-fail  { border-left-color: var(--dash-error); }
+.event-card.msg-assist { border-left-color: var(--dash-accent); }
+
+.event-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+.event-tool   { font-weight: 600; font-family: var(--dash-font-mono); color: var(--dash-accent); }
+.event-server { color: var(--dash-fg-muted); font-size: 11px; }
+.event-dur    { color: var(--dash-fg-muted); font-size: 11px; margin-left: auto; }
+.event-ts     { color: var(--dash-fg-muted); font-size: 10px; }
+.event-status { font-size: 11px; }
+.event-status.ok  { color: var(--dash-success); }
+.event-status.err { color: var(--dash-error); }
+
+/* Expandable detail section */
+.event-detail {
+  display: none;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--dash-bg);
+  border-radius: var(--dash-radius);
+  padding: 8px;
+}
+.event-card.expanded .event-detail { display: block; }
+
+/* Detail subsections */
+.detail-section { margin-bottom: 8px; }
+.detail-section:last-child { margin-bottom: 0; }
+.detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--dash-fg-muted);
+  margin-bottom: 3px;
+  letter-spacing: 0.5px;
+}
+.detail-content {
+  font-family: var(--dash-font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--dash-fg);
+  line-height: 1.4;
+}
+.detail-content.reasoning {
+  color: var(--dash-warning);
+  font-family: var(--dash-font-ui);
+  font-style: italic;
+  word-break: break-word;
+}
+
+/* Plan steps in detail */
+.detail-step {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--dash-border);
+  align-items: baseline;
+}
+.detail-step:last-child { border-bottom: none; }
+.detail-step-icon { width: 14px; text-align: center; flex-shrink: 0; }
+.detail-step-title { flex: 1; font-size: 11px; }
+.detail-step-tool {
+  font-family: var(--dash-font-mono);
+  font-size: 10px;
+  color: var(--dash-accent);
+}
+.detail-step-status { font-size: 10px; }
+.detail-step-status.ok  { color: var(--dash-success); }
+.detail-step-status.err { color: var(--dash-error); }
+.detail-step-status.run { color: var(--dash-info); }
+
+/* Expand indicator */
+.expand-hint {
+  font-size: 10px;
+  color: var(--dash-fg-muted);
+  margin-top: 2px;
+  opacity: 0.6;
+}
+.event-card.expanded .expand-hint { display: none; }
+
+/* Scroll-to-bottom button + badge */
+#scroll-btn {
+  display: none;
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: var(--dash-accent);
+  color: var(--dash-bg);
+  border: none;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  z-index: 10;
+}
+/* Agent badge */
+.event-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.event-agent-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Responsive: narrow panel / small screen ──────────────────── */
+#events {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 400px) {
+  #filter-bar { flex-direction: column; gap: 4px; padding: 4px 6px; }
+  #filter-bar input { min-width: unset; width: 100%; }
+  #filter-bar select { width: 100%; }
+  .event-header { flex-wrap: wrap; gap: 3px; }
+  .event-tool { font-size: 11px; }
+  .event-ts { font-size: 9px; }
+  .event-dur { font-size: 10px; }
+  .event-server { font-size: 10px; }
+  .event-card { padding: 5px 6px; }
+  .event-agent-badge { font-size: 9px; padding: 0 4px; }
+  .detail-content { font-size: 10px; }
+  .detail-label { font-size: 9px; }
+  .detail-step { gap: 4px; }
+  .detail-step-title { font-size: 10px; }
+  #scroll-btn { padding: 6px 12px; }
+}
+
+@media (max-width: 280px) {
+  .event-server { display: none; }
+  .event-dur { display: none; }
+  .expand-hint { display: none; }
+  .event-agent-badge { display: none; }
+}
+
+@media (pointer: coarse) {
+  .event-card { padding: 8px 10px; }
+  #scroll-btn { min-height: 40px; }
+}
+
+#events-wrapper { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+</style>
+</head>
+<body>
+
+<div id="filter-bar">
+  <input type="text" id="search-input" placeholder="Search…">
+  <select id="server-filter"><option value="">All servers</option></select>
+  <select id="status-filter">
+    <option value="">All</option>
+    <option value="ok">Success</option>
+    <option value="err">Error</option>
+  </select>
+  <select id="agent-filter" style="display:none"><option value="">All agents</option></select>
+</div>
+
+<div id="events-wrapper">
+  <div id="events"></div>
+  <button id="scroll-btn">↓ Scroll to bottom</button>
+</div>
+
+<script>
+'use strict';
+const PROTOCOL = 'mcp-dashboard';
+const VERSION  = 1;
+
+let allEvents   = [];
+let filterText  = '';
+let filterServer = '';
+let filterStatus = '';
+let filterAgent  = '';
+let autoScroll  = true;
+let newCount    = 0;
+let servers     = new Set();
+let agents      = new Set();
+let _multiAgent = false;
+const AGENT_COLORS  = ['#7aa2f7','#9ece6a','#e0af68','#f7768e','#7dcfff','#bb9af7','#ff9e64','#73daca'];
+const agentColorMap = new Map();
+
+// Virtual scroll threshold
+const VIRT_THRESHOLD = 500;
+
+const eventsEl    = document.getElementById('events');
+const scrollBtn   = document.getElementById('scroll-btn');
+const searchInput = document.getElementById('search-input');
+const serverSel   = document.getElementById('server-filter');
+const statusSel   = document.getElementById('status-filter');
+const agentSel    = document.getElementById('agent-filter');
+
+function agentColor(agentId) {
+  if (!agentColorMap.has(agentId)) {
+    agentColorMap.set(agentId, AGENT_COLORS[agentColorMap.size % AGENT_COLORS.length]);
+  }
+  return agentColorMap.get(agentId);
+}
+
+function agentBadgeHtml(agentId) {
+  if (!_multiAgent || !agentId) return '';
+  const color = agentColor(agentId);
+  return `<span class="event-agent-badge"><span class="event-agent-dot" style="background:${color}"></span>${esc(agentId)}</span>`;
+}
+
+// ── postMessage handler ─────────────────────────────────────────
+window.addEventListener('message', (evt) => {
+  const msg = evt.data;
+  if (!msg || msg.protocol !== PROTOCOL) return;
+
+  switch (msg.type) {
+    case 'INIT':
+      applyTheme(msg.payload.theme || {});
+      sendReady();
+      break;
+    case 'THEME':
+      applyTheme(msg.payload);
+      break;
+    case 'TOOL_RESULT':
+      addEvent('tool', msg.payload);
+      break;
+    case 'AGENT_STATE':
+      addEvent('state', msg.payload);
+      break;
+    case 'PLAN_UPDATE':
+      addEvent('plan', msg.payload);
+      break;
+    case 'CONVERSATION_MESSAGE':
+      addEvent('message', msg.payload);
+      break;
+    case 'ACTIVITY_HISTORY':
+      handleActivityHistory(msg.payload);
+      break;
+  }
+});
+
+// Works both as embedded iframe and as a popout window
+function getShell() {
+  if (window.parent !== window) return window.parent;
+  if (window.opener) return window.opener;
+  return null;
+}
+
+function sendReady() {
+  const shell = getShell();
+  if (!shell) return;
+  shell.postMessage({
+    protocol: PROTOCOL, version: VERSION,
+    type: 'READY',
+    payload: { name: 'Activity Stream', icon: 'activity', accepts: ['TOOL_RESULT', 'AGENT_STATE', 'PLAN_UPDATE', 'CONVERSATION_MESSAGE', 'ACTIVITY_HISTORY'], version: 1 }
+  }, '*');
+}
+
+// ── Theme ───────────────────────────────────────────────────────
+function applyTheme(t) {
+  const r = document.documentElement;
+  const set = (k, v) => v && r.style.setProperty(k, v);
+  set('--dash-bg', t.bg); set('--dash-bg-surface', t.bg_surface);
+  set('--dash-bg-hover', t.bg_hover); set('--dash-fg', t.fg);
+  set('--dash-fg-muted', t.fg_muted); set('--dash-accent', t.accent);
+  set('--dash-success', t.success); set('--dash-warning', t.warning);
+  set('--dash-error', t.error); set('--dash-info', t.info);
+  set('--dash-border', t.border); set('--dash-font-mono', t.font_mono);
+  set('--dash-font-ui', t.font_ui); set('--dash-font-size', t.font_size);
+  set('--dash-radius', t.radius); set('--dash-spacing', t.spacing);
+}
+
+// ── Events ──────────────────────────────────────────────────────
+function addEvent(kind, payload) {
+  const ev = { kind, payload, ts: Date.now(), id: allEvents.length };
+
+  // For plan updates, replace existing entry for the same plan_id (running→complete)
+  if (kind === 'plan' && payload.plan_id) {
+    const existIdx = allEvents.findIndex(e => e.kind === 'plan' && e.payload.plan_id === payload.plan_id);
+    if (existIdx !== -1) {
+      allEvents[existIdx] = ev;
+      ev.id = existIdx;
+      rerender();
+      return;
+    }
+  }
+
+  // Skip state events where status is the same as the previous state event
+  if (kind === 'state') {
+    const lastState = allEvents.filter(e => e.kind === 'state').pop();
+    if (lastState && lastState.payload.status === payload.status && lastState.payload.current_tool === payload.current_tool) {
+      return; // Deduplicate identical state transitions
+    }
+  }
+
+  allEvents.push(ev);
+
+  if (kind === 'tool' && payload.server_name) {
+    if (!servers.has(payload.server_name)) {
+      servers.add(payload.server_name);
+      const opt = document.createElement('option');
+      opt.value = payload.server_name;
+      opt.textContent = payload.server_name;
+      serverSel.appendChild(opt);
+    }
+  }
+
+  // Track agents for filter + badge
+  const aid = payload.agent_id;
+  if (aid && !agents.has(aid)) {
+    agents.add(aid);
+    const opt = document.createElement('option');
+    opt.value = aid;
+    opt.textContent = aid;
+    agentSel.appendChild(opt);
+    if (agents.size > 1 && !_multiAgent) {
+      _multiAgent = true;
+      agentSel.style.display = '';
+      rerender(); // re-render to add badges to existing cards
+    }
+  }
+
+  if (matchesFilter(ev)) {
+    renderEvent(ev);
+  }
+}
+
+function matchesFilter(ev) {
+  const p = ev.payload;
+  if (filterStatus === 'ok'  && p.success === false) return false;
+  if (filterStatus === 'err' && p.success !== false && ev.kind === 'tool')  return false;
+  if (filterServer && p.server_name !== filterServer) return false;
+  if (filterAgent && p.agent_id !== filterAgent) return false;
+  if (filterText) {
+    const haystack = JSON.stringify(p).toLowerCase();
+    if (!haystack.includes(filterText)) return false;
+  }
+  return true;
+}
+
+function renderEvent(ev) {
+  const card = buildCard(ev);
+  eventsEl.appendChild(card);
+  trimDom();
+  if (autoScroll) {
+    eventsEl.scrollTop = eventsEl.scrollHeight;
+  } else {
+    newCount++;
+    updateScrollBtn();
+  }
+}
+
+// ── Card builders by event kind ─────────────────────────────────
+function buildCard(ev) {
+  switch (ev.kind) {
+    case 'tool':    return buildToolCard(ev);
+    case 'state':   return buildStateCard(ev);
+    case 'plan':    return buildPlanCard(ev);
+    case 'message': return buildMessageCard(ev);
+    default:        return buildGenericCard(ev);
+  }
+}
+
+function buildToolCard(ev) {
+  const p    = ev.payload;
+  const card = document.createElement('div');
+  const ok   = p.success !== false;
+
+  card.className = `event-card ${ok ? 'tool-ok' : 'tool-err'}`;
+  card.dataset.evId = ev.id;
+
+  const tsStr  = new Date(ev.ts).toLocaleTimeString();
+  const durStr = p.duration_ms != null ? `${p.duration_ms}ms` : '';
+  const summary = summariseResult(p.result);
+
+  // Build structured detail
+  let detailHtml = '';
+
+  // Arguments section
+  if (p.arguments && Object.keys(p.arguments).length > 0) {
+    detailHtml += `<div class="detail-section">
+      <div class="detail-label">Arguments</div>
+      <div class="detail-content">${esc(JSON.stringify(p.arguments, null, 2))}</div>
+    </div>`;
+  }
+
+  // Result section
+  if (p.result != null) {
+    const resultStr = typeof p.result === 'string' ? p.result : JSON.stringify(p.result, null, 2);
+    detailHtml += `<div class="detail-section">
+      <div class="detail-label">Result</div>
+      <div class="detail-content">${esc(resultStr)}</div>
+    </div>`;
+  }
+
+  // Error section
+  if (p.error) {
+    detailHtml += `<div class="detail-section">
+      <div class="detail-label">Error</div>
+      <div class="detail-content" style="color:var(--dash-error)">${esc(p.error)}</div>
+    </div>`;
+  }
+
+  const hasDetail = detailHtml.length > 0;
+
+  card.innerHTML = `
+    <div class="event-header">
+      ${agentBadgeHtml(p.agent_id)}
+      <span class="event-tool">${esc(p.tool_name || '')}</span>
+      <span class="event-server">${esc(p.server_name || '')}</span>
+      <span class="event-dur">${esc(durStr)}</span>
+    </div>
+    <div class="event-header" style="margin-top:2px">
+      <span class="event-status ${ok ? 'ok' : 'err'}">${ok ? '&#10003;' : '&#10007;'} ${ok ? summary : esc(p.error || 'error')}</span>
+      <span class="event-ts" style="margin-left:auto" title="${new Date(ev.ts).toISOString()}">${tsStr}</span>
+    </div>
+    ${hasDetail ? '<div class="expand-hint">click to expand</div>' : ''}
+    <div class="event-detail">${detailHtml}</div>`;
+
+  if (hasDetail) card.addEventListener('click', () => card.classList.toggle('expanded'));
+  return card;
+}
+
+function buildStateCard(ev) {
+  const p    = ev.payload;
+  const card = document.createElement('div');
+  const tsStr = new Date(ev.ts).toLocaleTimeString();
+
+  const status = p.status || 'unknown';
+  const isThinking = status === 'thinking';
+
+  card.className = `event-card ${isThinking ? 'thinking' : 'state-chg'}`;
+  card.dataset.evId = ev.id;
+
+  const icon = isThinking ? '&#128161;' : (status === 'tool_calling' ? '&#9881;' : '&#9678;');
+  const tool = p.current_tool ? ` &rarr; ${esc(p.current_tool)}` : '';
+  const tokens = p.tokens_used ? ` (${p.tokens_used} tokens)` : '';
+
+  card.innerHTML = `
+    <div class="event-header">
+      ${agentBadgeHtml(p.agent_id)}
+      <span class="event-tool" style="color:${isThinking ? 'var(--dash-warning)' : 'var(--dash-fg-muted)'}">${icon} ${esc(status)}${tool}</span>
+      <span class="event-ts" style="margin-left:auto">${tsStr}${tokens}</span>
+    </div>`;
+
+  return card;
+}
+
+function buildPlanCard(ev) {
+  const p    = ev.payload;
+  const card = document.createElement('div');
+  const tsStr = new Date(ev.ts).toLocaleTimeString();
+
+  const planStatus = p.status || 'running';
+  const isRunning = planStatus === 'running';
+  const isComplete = planStatus === 'complete';
+  const isFailed = planStatus === 'failed';
+
+  card.className = `event-card ${isFailed ? 'plan-fail' : (isComplete ? 'plan-done' : 'plan-run')}`;
+  card.dataset.evId = ev.id;
+
+  const steps = p.steps || [];
+  const completed = steps.filter(s => s.status === 'complete' || s.status === 'skipped').length;
+  const failed = steps.filter(s => s.status === 'failed').length;
+  const total = steps.length;
+
+  const icon = isRunning ? '&#9881;' : (isComplete ? '&#10003;' : '&#10007;');
+  const statusColor = isFailed ? 'var(--dash-error)' : (isComplete ? 'var(--dash-success)' : 'var(--dash-info)');
+  const progress = total > 0 ? ` ${completed}/${total} steps` : '';
+
+  // Build steps detail
+  let detailHtml = '';
+  if (steps.length > 0) {
+    let stepsHtml = '';
+    for (const s of steps) {
+      const st = s.status || 'pending';
+      let sIcon = '&#9675;'; // ○
+      let sCls = '';
+      if (st === 'running')  { sIcon = '&#9678;'; sCls = 'run'; }
+      if (st === 'complete') { sIcon = '&#10003;'; sCls = 'ok'; }
+      if (st === 'failed')   { sIcon = '&#10007;'; sCls = 'err'; }
+      if (st === 'skipped')  { sIcon = '&#8722;'; sCls = ''; }
+
+      stepsHtml += `<div class="detail-step">
+        <span class="detail-step-icon">${sIcon}</span>
+        <span class="detail-step-title">${esc(s.title || 'Step ' + (s.index || ''))}</span>
+        ${s.tool ? `<span class="detail-step-tool">${esc(s.tool)}</span>` : ''}
+        <span class="detail-step-status ${sCls}">${esc(st)}</span>
+      </div>`;
+    }
+    detailHtml += `<div class="detail-section">
+      <div class="detail-label">Steps</div>
+      ${stepsHtml}
+    </div>`;
+  }
+
+  if (p.error) {
+    detailHtml += `<div class="detail-section">
+      <div class="detail-label">Error</div>
+      <div class="detail-content" style="color:var(--dash-error)">${esc(p.error)}</div>
+    </div>`;
+  }
+
+  const hasDetail = detailHtml.length > 0;
+
+  card.innerHTML = `
+    <div class="event-header">
+      ${agentBadgeHtml(p.agent_id)}
+      <span class="event-tool" style="color:${statusColor}">${icon} Plan: ${esc(p.title || 'Untitled')}</span>
+      <span class="event-dur">${progress}</span>
+    </div>
+    <div class="event-header" style="margin-top:2px">
+      <span class="event-status" style="color:${statusColor}">${esc(planStatus)}</span>
+      <span class="event-ts" style="margin-left:auto">${tsStr}</span>
+    </div>
+    ${hasDetail ? '<div class="expand-hint">click to expand</div>' : ''}
+    <div class="event-detail">${detailHtml}</div>`;
+
+  if (hasDetail) card.addEventListener('click', () => card.classList.toggle('expanded'));
+  return card;
+}
+
+function buildMessageCard(ev) {
+  const p    = ev.payload;
+  const card = document.createElement('div');
+  const tsStr = new Date(ev.ts).toLocaleTimeString();
+
+  const role = p.role || 'unknown';
+  const hasReasoning = !!(p.reasoning);
+  const hasToolCalls = !!(p.tool_calls && p.tool_calls.length > 0);
+
+  // Only show thinking/reasoning cards — assistant text goes to terminal
+  if (role === 'assistant' && hasReasoning) {
+    card.className = 'event-card thinking';
+    card.dataset.evId = ev.id;
+
+    const preview = p.reasoning.slice(0, 80) + (p.reasoning.length > 80 ? '…' : '');
+
+    let detailHtml = `<div class="detail-section">
+      <div class="detail-label">Reasoning</div>
+      <div class="detail-content reasoning">${esc(p.reasoning)}</div>
+    </div>`;
+
+    if (p.content) {
+      const contentPreview = typeof p.content === 'string' ? p.content.slice(0, 200) : JSON.stringify(p.content).slice(0, 200);
+      detailHtml += `<div class="detail-section">
+        <div class="detail-label">Response</div>
+        <div class="detail-content">${esc(contentPreview)}${p.content.length > 200 ? '…' : ''}</div>
+      </div>`;
+    }
+
+    card.innerHTML = `
+      <div class="event-header">
+        ${agentBadgeHtml(p.agent_id)}
+        <span class="event-tool" style="color:var(--dash-warning)">&#128161; Thinking</span>
+        <span class="event-ts" style="margin-left:auto">${tsStr}</span>
+      </div>
+      <div class="event-header" style="margin-top:2px">
+        <span style="font-size:11px;color:var(--dash-fg-muted)">${esc(preview)}</span>
+      </div>
+      <div class="expand-hint">click to expand</div>
+      <div class="event-detail">${detailHtml}</div>`;
+
+    card.addEventListener('click', () => card.classList.toggle('expanded'));
+    return card;
+  }
+
+  // For non-reasoning messages, only show if they have tool_calls info
+  if (role === 'assistant' && hasToolCalls) {
+    card.className = 'event-card msg-assist';
+    card.dataset.evId = ev.id;
+
+    const toolNames = p.tool_calls.map(tc => tc.function?.name || tc.name || '?').join(', ');
+
+    let detailHtml = '';
+    for (const tc of p.tool_calls) {
+      const name = tc.function?.name || tc.name || '?';
+      const args = tc.function?.arguments || tc.arguments || {};
+      const argsStr = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
+      detailHtml += `<div class="detail-section">
+        <div class="detail-label">${esc(name)}</div>
+        <div class="detail-content">${esc(argsStr)}</div>
+      </div>`;
+    }
+
+    card.innerHTML = `
+      <div class="event-header">
+        ${agentBadgeHtml(p.agent_id)}
+        <span class="event-tool">&#9881; Calling: ${esc(toolNames)}</span>
+        <span class="event-ts" style="margin-left:auto">${tsStr}</span>
+      </div>
+      <div class="expand-hint">click to expand</div>
+      <div class="event-detail">${detailHtml}</div>`;
+
+    card.addEventListener('click', () => card.classList.toggle('expanded'));
+    return card;
+  }
+
+  // User messages with attachments
+  if (role === 'user' && p.attachments && p.attachments.length > 0) {
+    card.className = 'event-card user-att';
+    card.dataset.evId = ev.id;
+    const attNames = p.attachments.map(a => a.display_name || '?').join(', ');
+    const totalSize = p.attachments.reduce((s, a) => s + (a.size_bytes || 0), 0);
+    const contentPreview = (p.content || '').slice(0, 80);
+    card.innerHTML = `
+      <div class="event-header">
+        ${agentBadgeHtml(p.agent_id)}
+        <span class="event-tool" style="color:var(--dash-success)">&#128206; Attachments: ${esc(attNames)}</span>
+        <span class="event-dur">${_formatBytes(totalSize)}</span>
+        <span class="event-ts" style="margin-left:auto">${tsStr}</span>
+      </div>
+      <div class="event-header" style="margin-top:2px">
+        <span style="font-size:11px;color:var(--dash-fg-muted)">${esc(contentPreview)}</span>
+      </div>`;
+    return card;
+  }
+
+  // Skip other message types (user input, plain assistant text without reasoning)
+  // Return an empty non-rendered card
+  card.style.display = 'none';
+  return card;
+}
+
+function buildGenericCard(ev) {
+  const card = document.createElement('div');
+  card.className = 'event-card state-chg';
+  card.dataset.evId = ev.id;
+  const tsStr = new Date(ev.ts).toLocaleTimeString();
+  card.innerHTML = `
+    <div class="event-header">
+      <span class="event-tool" style="color:var(--dash-fg-muted)">&#9678; ${esc(ev.kind)}</span>
+      <span class="event-ts" style="margin-left:auto">${tsStr}</span>
+    </div>
+    <div class="event-detail"><div class="detail-content">${esc(JSON.stringify(ev.payload, null, 2))}</div></div>`;
+  card.addEventListener('click', () => card.classList.toggle('expanded'));
+  return card;
+}
+
+function summariseResult(result) {
+  if (result == null) return 'done';
+  if (typeof result === 'string') return result.slice(0, 60) + (result.length > 60 ? '…' : '');
+  if (Array.isArray(result)) return `${result.length} item${result.length !== 1 ? 's' : ''}`;
+  if (typeof result === 'object') {
+    const keys = Object.keys(result);
+    if (keys.length === 0) return '{}';
+    return keys.slice(0, 3).join(', ') + (keys.length > 3 ? '…' : '');
+  }
+  return String(result).slice(0, 60);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '';
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / 1048576).toFixed(1) + 'MB';
+}
+
+function trimDom() {
+  // Keep at most VIRT_THRESHOLD cards in the DOM
+  const cards = eventsEl.querySelectorAll('.event-card');
+  if (cards.length > VIRT_THRESHOLD + 50) {
+    for (let i = 0; i < 50; i++) cards[i].remove();
+  }
+}
+
+// ── Scroll ──────────────────────────────────────────────────────
+eventsEl.parentElement.addEventListener('scroll', () => {
+  const el = eventsEl.parentElement;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  autoScroll = atBottom;
+  if (atBottom) { newCount = 0; }
+  updateScrollBtn();
+}, { passive: true });
+
+// Fix: scroll events are on the parent wrapper
+const wrapper = document.getElementById('events-wrapper');
+wrapper.style.overflowY = 'auto';
+eventsEl.style.minHeight = '100%';
+
+scrollBtn.addEventListener('click', () => {
+  wrapper.scrollTop = wrapper.scrollHeight;
+  autoScroll = true;
+  newCount = 0;
+  updateScrollBtn();
+});
+
+function updateScrollBtn() {
+  if (autoScroll || newCount === 0) {
+    scrollBtn.style.display = 'none';
+  } else {
+    scrollBtn.style.display = 'block';
+    scrollBtn.textContent = `↓ ${newCount} new`;
+  }
+}
+
+// ── Filters ─────────────────────────────────────────────────────
+searchInput.addEventListener('input', () => {
+  filterText = searchInput.value.toLowerCase();
+  rerender();
+});
+serverSel.addEventListener('change', () => {
+  filterServer = serverSel.value;
+  rerender();
+});
+statusSel.addEventListener('change', () => {
+  filterStatus = statusSel.value;
+  rerender();
+});
+agentSel.addEventListener('change', () => {
+  filterAgent = agentSel.value;
+  rerender();
+});
+
+function rerender() {
+  eventsEl.innerHTML = '';
+  for (const ev of allEvents) {
+    if (matchesFilter(ev)) renderEvent(ev);
+  }
+}
+
+// ── Activity history replay (session load) ───────────────────
+function handleActivityHistory(payload) {
+  const events = payload.events || [];
+  // Clear current state and replay
+  allEvents = [];
+  servers = new Set();
+  agents = new Set();
+  _multiAgent = false;
+  eventsEl.innerHTML = '';
+  autoScroll = true;
+  newCount = 0;
+
+  // Rebuild filter options
+  serverSel.innerHTML = '<option value="">All servers</option>';
+  agentSel.innerHTML = '<option value="">All agents</option>';
+  agentSel.style.display = 'none';
+
+  for (const ev of events) {
+    // Each event has { type: 'TOOL_RESULT'|'CONVERSATION_MESSAGE', payload: {...} }
+    const kind = ev.type === 'TOOL_RESULT' ? 'tool'
+               : ev.type === 'CONVERSATION_MESSAGE' ? 'message'
+               : ev.type === 'PLAN_UPDATE' ? 'plan'
+               : ev.type === 'AGENT_STATE' ? 'state'
+               : 'unknown';
+    if (kind === 'unknown') continue;
+    addEvent(kind, ev.payload);
+  }
+
+  // Scroll to bottom after replay
+  wrapper.scrollTop = wrapper.scrollHeight;
+}
+
+// Send READY immediately (shell will send INIT back)
+sendReady();
+</script>
+</body>
+</html>

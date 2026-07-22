@@ -243,13 +243,13 @@ class InteractiveCommandAdapter:
                 option_name, partial_value = current_arg.split("=", 1)
                 param_name = option_name[2:]
 
-                param = next(
+                found_param = next(
                     (p for p in command.parameters if p.name == param_name),
-                    None,  # type: ignore[arg-type]
+                    None,
                 )
 
-                if param and param.choices:
-                    for choice in param.choices:
+                if found_param and found_param.choices:
+                    for choice in found_param.choices:
                         if str(choice).startswith(partial_value):
                             completions.append(f"{option_name}={choice}")
 

@@ -6,6 +6,7 @@ Uses the existing enhanced model commands from mcp_cli.commands.model
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from mcp_cli.commands.base import (
@@ -14,9 +15,12 @@ from mcp_cli.commands.base import (
     CommandParameter,
     CommandResult,
 )
+from mcp_cli.config.defaults import DEFAULT_PROVIDER_DISCOVERY_TIMEOUT
 
 if TYPE_CHECKING:
     from mcp_cli.commands.models.model import ModelInfo
+
+logger = logging.getLogger(__name__)
 
 
 class ModelCommand(CommandGroup):
@@ -228,7 +232,9 @@ class ModelListCommand(UnifiedCommand):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=DEFAULT_PROVIDER_DISCOVERY_TIMEOUT
+            )
             if proc.returncode == 0:
                 lines = stdout.decode().strip().split("\n")
                 models = []
@@ -238,8 +244,8 @@ class ModelListCommand(UnifiedCommand):
                         if parts:
                             models.append(parts[0])
                 return models
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Ollama model discovery failed: %s", e)
         return []
 
     async def _get_provider_models(self, provider: str) -> list[str]:
@@ -280,8 +286,8 @@ class ModelListCommand(UnifiedCommand):
                         model_list = [default_model]
 
                 return model_list
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Provider model discovery failed for %s: %s", provider, e)
         return []
 
     async def _fetch_models_from_api(self, provider: str, api_base: str) -> list[str]:
@@ -302,7 +308,9 @@ class ModelListCommand(UnifiedCommand):
             # Ensure api_base ends properly for /models endpoint
             models_url = f"{api_base.rstrip('/')}/models"
 
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(
+                timeout=DEFAULT_PROVIDER_DISCOVERY_TIMEOUT
+            ) as client:
                 resp = await client.get(
                     models_url,
                     headers={"Authorization": f"Bearer {api_key}"},
@@ -314,8 +322,8 @@ class ModelListCommand(UnifiedCommand):
                     # OpenAI-compatible format: {"data": [{"id": "model-name", ...}]}
                     return [m.get("id") for m in data["data"] if m.get("id")]
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("API model fetch failed for %s: %s", provider, e)
         return []
 
 

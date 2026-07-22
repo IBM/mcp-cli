@@ -1,0 +1,249 @@
+/* ── Responsive: 5-tier breakpoint system ──────────────────────────
+   xs: 0-479px (phones)
+   sm: 480-767px (large phones, narrow embeds)
+   md: 768-1023px (tablets, narrow desktop)
+   lg: 1024-1439px (landscape tablets, IDE panels)
+   xl: 1440px+ (full desktop — default, no overrides needed)
+   ─────────────────────────────────────────────────────────────────── */
+
+/* ── Overflow menu (mobile toolbar) ─────────────────────────────── */
+#overflow-btn { display: none; }
+#overflow-menu {
+  position: fixed;
+  right: 8px;
+  min-width: 180px;
+  z-index: 150;
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+/* ── Main content: grid + right sidebar ─────────────────────────── */
+#main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Sidebar resize handle ──────────────────────────────────────── */
+#sidebar-resize-handle {
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  z-index: 20;          /* above #view-overlay (z-index:5) */
+  position: relative;   /* establish stacking context for z-index */
+}
+/* Wider invisible hit area for easier grabbing */
+#sidebar-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: -6px; right: -6px;
+  cursor: col-resize;
+}
+#sidebar-resize-handle:hover, #sidebar-resize-handle.dragging { background: var(--dash-accent); }
+body.mobile-sidebar #sidebar-resize-handle { display: none; }
+
+/* ── Right sidebar (always visible desktop, slide-over mobile) ─── */
+#sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 15;
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-right: none;
+  border-radius: var(--dash-radius) 0 0 var(--dash-radius);
+  color: var(--dash-fg-muted);
+  font-size: 14px;
+  padding: 12px 6px;
+  cursor: pointer;
+  box-shadow: -2px 0 8px rgba(0,0,0,0.3);
+  line-height: 1;
+  writing-mode: vertical-lr;
+  letter-spacing: 0.1em;
+}
+#sidebar-toggle:hover { background: var(--dash-bg-hover); color: var(--dash-fg); }
+#sidebar-toggle.has-update { color: var(--dash-accent); }
+
+#sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  width: 30%;
+  min-width: 240px;
+  max-width: 400px;
+  background: var(--dash-bg);
+  border-left: 1px solid var(--dash-border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Sidebar header — visible only on mobile (desktop sections have their own headers) */
+#sidebar-header {
+  display: none;
+  align-items: center;
+  padding: 0 10px;
+  height: 32px;
+  min-height: 32px;
+  background: var(--dash-bg-surface);
+  border-bottom: 1px solid var(--dash-border);
+  flex-shrink: 0;
+}
+#sidebar-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dash-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+#sidebar-close {
+  background: transparent;
+  border: none;
+  color: var(--dash-fg-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+#sidebar-close:hover { color: var(--dash-fg); }
+
+/* Sidebar view slot — stacked collapsible sections */
+#sidebar-view-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Collapsible accordion sections ──────────────────────────────── */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--dash-border);
+}
+.sidebar-section:last-child { border-bottom: none; }
+.sidebar-section.expanded {
+  flex: 1;
+}
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  height: 26px;
+  min-height: 26px;
+  background: var(--dash-bg-surface);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+.sidebar-section-header:hover { background: var(--dash-bg-hover); }
+.sidebar-section-chevron {
+  font-size: 10px;
+  color: var(--dash-fg-muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.sidebar-section.expanded .sidebar-section-chevron { transform: rotate(90deg); }
+.sidebar-section-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dash-fg-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-section.expanded .sidebar-section-name { color: var(--dash-fg); }
+.sidebar-section-btns {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.sidebar-section-header:hover .sidebar-section-btns { opacity: 1; }
+.sidebar-section-btn {
+  background: transparent;
+  border: none;
+  color: var(--dash-fg-muted);
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1;
+}
+.sidebar-section-btn:hover { background: var(--dash-bg-hover); color: var(--dash-fg); }
+.sidebar-section.maximized { flex: 100 !important; }
+/* When any section is maximized, collapse siblings */
+#sidebar-view-slot:has(.sidebar-section.maximized) .sidebar-section:not(.maximized) {
+  flex: 0 0 auto !important;
+}
+#sidebar-view-slot:has(.sidebar-section.maximized) .sidebar-section:not(.maximized) .sidebar-section-body {
+  display: none !important;
+}
+.sidebar-section-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: none;
+}
+.sidebar-section.expanded .sidebar-section-body {
+  display: block;
+}
+
+/* ── Drawer backdrop ────────────────────────────────────────────── */
+#drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 199;
+  display: none;
+}
+#drawer-backdrop.visible { display: block; }
+
+/* ── Mobile sidebar mode — sidebar becomes a fixed slide-over ──── */
+body.mobile-sidebar .grid-row { flex-direction: row; }
+body.mobile-sidebar .panel { min-width: unset; }
+body.mobile-sidebar .resize-handle-col,
+body.mobile-sidebar .resize-handle-row { display: none; }
+body.mobile-sidebar #sidebar-toggle { display: block; }
+/* Hide non-primary panels from the grid — they live in the sidebar */
+body.mobile-sidebar .panel.sidebar-hosted { display: none; }
+body.mobile-sidebar .panel:not(.sidebar-hosted) { flex: 1 !important; }
+/* Sidebar becomes a fixed overlay on mobile */
+body.mobile-sidebar #sidebar-panel {
+  display: none;
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(85vw, 360px);
+  max-width: none;
+  min-width: 0;
+  z-index: 210;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.5);
+}
+body.mobile-sidebar #sidebar-panel.open { display: flex; }
+body.mobile-sidebar #sidebar-header { display: flex; }
+
+/* ── Focus styles ─────────────────────────────────────────────────── */
+#sidebar-toggle:focus-visible,
+#sidebar-close:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }
+.sidebar-section-header:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }
+.sidebar-section-btn:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }
+
+/* ── Container-aware layout (ResizeObserver classes for IDE embedding) */
+body.container-narrow .grid-row { flex-direction: column; }
+body.container-narrow .resize-handle-col { display: none; }
+body.container-narrow .panel + .panel { border-left: none; border-top: 1px solid var(--dash-border); }
+body.container-narrow .panel { min-width: unset; }

@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -893,7 +894,7 @@ class TestFirstChunkTimeout:
         assert 180.0 not in timeouts_used, f"Did not expect 180.0 in {timeouts_used}"
 
     @pytest.mark.asyncio
-    async def test_after_tool_calls_timeout_message_mentions_tool_results(self):
+    async def test_after_tool_calls_timeout_message_mentions_tool_results(self, caplog):
         """Timeout message after tool calls mentions tool result processing."""
         display = _make_display()
         # Use very short first_chunk to trigger timeout
@@ -909,7 +910,7 @@ class TestFirstChunkTimeout:
 
         # Patch the after-tools default to a tiny value so timeout fires
         with (
-            patch("chuk_term.ui.output") as mock_output,
+            caplog.at_level(logging.WARNING, logger="mcp_cli.streaming"),
             patch(
                 "mcp_cli.config.defaults.DEFAULT_STREAMING_FIRST_CHUNK_AFTER_TOOLS_TIMEOUT",
                 0.01,
@@ -917,7 +918,10 @@ class TestFirstChunkTimeout:
         ):
             await handler.stream_response(client, messages=[], after_tool_calls=True)
 
-        # Check that the error message mentions tool results
-        mock_output.error.assert_called_once()
-        error_msg = mock_output.error.call_args[0][0]
-        assert "tool" in error_msg.lower()
+        # Check that the warning message mentions tool calls
+        warning_msgs = [
+            r.message
+            for r in caplog.records
+            if r.levelname == "WARNING" and r.name == "mcp_cli.streaming"
+        ]
+        assert any("tool" in m.lower() for m in warning_msgs)

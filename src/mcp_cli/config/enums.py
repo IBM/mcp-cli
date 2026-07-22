@@ -122,6 +122,26 @@ class SessionAction(str, Enum):
     DELETE = "delete"
 
 
+class PlanAction(str, Enum):
+    """Actions for /plan command."""
+
+    CREATE = "create"
+    LIST = "list"
+    SHOW = "show"
+    RUN = "run"
+    DELETE = "delete"
+    RESUME = "resume"
+
+
+class PlanStatus(str, Enum):
+    """Plan execution status values."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class ServerAction(str, Enum):
     """Actions for /server command."""
 
@@ -158,6 +178,8 @@ __all__ = [
     "ServerStatus",
     # Command action enums
     "ConversationAction",
+    "PlanAction",
+    "PlanStatus",
     "SessionAction",
     "TokenAction",
     "ServerAction",

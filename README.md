@@ -7,36 +7,73 @@ A powerful, feature-rich command-line interface for interacting with Model Conte
 
 **Default Configuration**: MCP CLI defaults to using Ollama with the `gpt-oss` reasoning model for local, privacy-focused operation without requiring API keys.
 
-## 🆕 Recent Updates (v0.14.0)
+## 🆕 Recent Updates (v0.16)
 
-### Production Hardening (Tier 5)
-- **Secret Redaction**: All log output (console and file) is automatically redacted for Bearer tokens, API keys, OAuth tokens, and Authorization headers
-- **Structured File Logging**: Optional `--log-file` flag enables rotating JSON log files (10MB, 3 backups) at DEBUG level with secret redaction
-- **Per-Server Timeouts**: Server configs now support `tool_timeout` and `init_timeout` overrides, resolved per-server → global → default
-- **Thread-Safe OAuth**: Concurrent OAuth flows are serialized with `asyncio.Lock` and copy-on-write header mutation
+### AI Virtual Memory (Experimental)
+- **`--vm` flag**: Enable OS-style virtual memory for conversation context management, powered by `chuk-ai-session-manager`
+- **`--vm-budget`**: Control token budget for conversation events (system prompt is uncapped on top), forcing earlier eviction and page creation
+- **`--vm-mode`**: Choose VM mode — `passive` (runtime-managed, default), `relaxed` (VM-aware conversation), or `strict` (model-driven paging with tools)
+- **`/memory` command**: Visualize VM state during conversations — page table, working set utilization, eviction metrics, TLB stats (aliases: `/vm`, `/mem`)
+- **Multimodal page_fault**: Image pages return multi-block content (text + image_url) so multimodal models can re-analyze recalled images
+- **`/memory page <id> --download`**: Export page content to local files with modality-aware extensions (.txt, .json, .png)
 
-### Code Quality (Tier 4)
-- **Core/UI Separation**: Core modules (`chat/conversation.py`, `chat/tool_processor.py`, `chat/chat_context.py`) no longer import `chuk_term.ui.output` — all logging goes through `logging` module
-- **Message Class Clarity**: Local `Message` renamed to `HistoryMessage` (backward-compat alias preserved) to distinguish from `chuk_llm.core.models.Message`
-- **Removed Global Singletons**: `_GLOBAL_TOOL_MANAGER` and associated getter/setter functions deleted
-- **Integration Test Framework**: Real MCP server tests with `@pytest.mark.integration` marker (SQLite server)
-- **Coverage Reporting**: Branch coverage enabled with `fail_under = 60` threshold in pyproject.toml
+### Execution Plans (Tier 6)
+- **`/plan` command**: Create, inspect, and execute reproducible tool call graphs — `create`, `list`, `show`, `run`, `delete`, `resume`
+- **Model-driven planning (`--plan-tools`)**: The LLM autonomously creates and executes plans during conversation — no `/plan` command needed. It calls `plan_create_and_execute` when multi-step orchestration is required, and uses regular tools for simple tasks. Each step renders with real-time progress in the terminal
+- **Parallel batch execution**: Independent plan steps run concurrently via topological batching (Kahn's BFS), with configurable `max_concurrency`
+- **Variable resolution**: `${var}`, `${var.field}` nested access, and template strings like `"https://${api.host}/users"` — type-preserving for single refs
+- **Dry-run mode**: Trace planned tool calls without executing — safe for production inspection
+- **Checkpointing & resume**: Execution state persisted after each batch; resume interrupted plans with `/plan resume <id>`
+- **Guard integration**: Plans respect existing budget, per-tool limits, and runaway detection guards
+- **DAG visualization**: ASCII rendering with status indicators (○/◉/●/✗) and parallel markers (∥)
+- **Re-planning**: Optional LLM-based re-planning on step failure (`enable_replan=True`)
+- **Powered by**: [chuk-ai-planner](https://github.com/chrishayuk/chuk-ai-planner) graph-based plan DSL
 
-### Previous: MCP Apps (SEP-1865)
-- **Interactive HTML UIs**: MCP servers can now serve interactive HTML applications (charts, tables, maps, markdown viewers) that render in your browser
+### MCP Apps (SEP-1865)
+- **Interactive HTML UIs**: MCP servers can serve interactive HTML applications (charts, tables, maps, markdown viewers) that render in your browser
 - **Sandboxed iframes**: Apps run in secure sandboxed iframes with CSP protection
 - **WebSocket bridge**: Real-time bidirectional communication between browser apps and MCP servers
 - **Automatic launch**: Tools with `_meta.ui` annotations automatically open in the browser when called
 - **Session reliability**: Message queuing, reconnection with exponential backoff, deferred tool result delivery
 
-### Previous: Performance & Polish (Tier 3)
-- **O(1) Tool Lookups**: Indexed tool lookup replacing O(n) linear scans in both ToolManager and ChatContext
-- **Cached LLM Tool Metadata**: Per-provider caching of tool definitions with automatic invalidation
-- **Startup Progress**: Real-time progress messages during initialization instead of a single spinner
-- **Token Usage Tracking**: Per-turn and cumulative token tracking with `/usage` command (aliases: `/tokens`, `/cost`)
+### Production Hardening
+- **Secret Redaction**: All log output (console and file) is automatically redacted for Bearer tokens, API keys, OAuth tokens, and Authorization headers
+- **Structured File Logging**: Optional `--log-file` flag enables rotating JSON log files (10MB, 3 backups) at DEBUG level
+- **Per-Server Timeouts**: Server configs support `tool_timeout` and `init_timeout` overrides, resolved per-server → global → default
+- **Thread-Safe OAuth**: Concurrent OAuth flows serialized with `asyncio.Lock` and copy-on-write header mutation
+- **Server Health Monitoring**: `/health` command, health-check-on-failure diagnostics, optional `--health-interval` background polling
+
+### Performance & Polish
+- **O(1) Tool Lookups**: Indexed tool lookup replacing O(n) linear scans
+- **Cached LLM Tool Metadata**: Per-provider caching with automatic invalidation
+- **Startup Progress**: Real-time progress messages during initialization
+- **Token Usage Tracking**: Per-turn and cumulative tracking with `/usage` command (aliases: `/tokens`, `/cost`)
 - **Session Persistence**: Save/load/list conversation sessions with auto-save every 10 turns (`/sessions`)
 - **Conversation Export**: Export conversations as Markdown or JSON with metadata (`/export`)
-- **Trusted Domains**: Tools from trusted server domains (e.g. chukai.io) skip confirmation prompts
+
+### Dashboard (Real-Time Browser UI)
+- **`--dashboard` flag**: Launch a real-time browser dashboard alongside chat mode
+- **Agent Terminal**: Live conversation view with message bubbles, streaming tokens, and attachment rendering
+- **Activity Stream**: Tool call/result pairs, reasoning steps, and user attachment events
+- **Plan Viewer**: Visual execution plan progress with DAG rendering
+- **Tool Registry**: Browse discovered tools, trigger execution from the browser
+- **Config Panel**: View and switch providers, models, and system prompt
+- **File Attachments**: "+" button for browser file upload, drag-and-drop, and clipboard paste
+
+### Multi-Modal Attachments
+- **`/attach` command**: Stage files for the next message — images, text/code, and audio (aliases: `/file`, `/image`)
+- **`--attach` CLI flag**: Attach files to the first message (repeatable: `--attach img.png --attach code.py`)
+- **Inline `@file:` references**: Mention `@file:path/to/file` anywhere in a message to attach it
+- **Image URL detection**: HTTP/HTTPS image URLs in messages are automatically sent as vision content
+- **Supported formats**: PNG, JPEG, GIF, WebP, HEIC (images), MP3, WAV (audio), plus 25+ text/code extensions
+- **Dashboard rendering**: Image thumbnails, expandable text previews, audio players, file badges
+- **Browser upload**: "+" button in dashboard chat input with drag-and-drop and clipboard paste support
+
+### Code Quality
+- **Core/UI Separation**: Core modules use `logging` only — no UI imports
+- **4,300+ tests**: Comprehensive test suite with branch coverage, integration tests, and 60% minimum threshold
+- **15 Architecture Principles**: Documented and enforced (see [architecture.md](architecture.md))
+- **Full [Roadmap](roadmap.md)**: Tiers 1-6 complete, Tiers 7-12 planned (traces, memory scopes, skills, scheduling, multi-agent)
 
 ## 🔄 Architecture Overview
 
@@ -63,6 +100,7 @@ The MCP CLI is built on a modular architecture with clean separation of concerns
 - **Performance Metrics**: Response timing, words/second, and execution statistics
 - **Rich Formatting**: Markdown rendering, syntax highlighting, and progress indicators
 - **Token Usage Tracking**: Per-turn and cumulative API token usage with `/usage` command
+- **Multi-Modal Attachments**: Attach images, text files, and audio to messages via `/attach`, `--attach`, `@file:` refs, or browser upload
 - **Session Persistence**: Auto-save and manual save/load of conversation sessions
 - **Conversation Export**: Export to Markdown or JSON with metadata and token usage
 
@@ -82,7 +120,7 @@ MCP CLI supports all providers and models from CHUK-LLM, including cutting-edge 
 | **IBM watsonx** 🏢 | Granite, Llama models | Enterprise compliance |
 | **Mistral AI** 🇪🇺 | Mistral Large, Medium | European, efficient models |
 
-### Robust Tool System (Powered by CHUK Tool Processor v0.13+)
+### Robust Tool System (Powered by CHUK Tool Processor v0.22+)
 - **Automatic Discovery**: Server-provided tools are automatically detected and catalogued
 - **Provider Adaptation**: Tool names are automatically sanitized for provider compatibility
 - **Production-Grade Execution**: Middleware layers with timeouts, retries, exponential backoff, caching, and circuit breakers
@@ -100,6 +138,18 @@ MCP CLI supports all providers and models from CHUK-LLM, including cutting-edge 
 - **WebSocket Bridge**: Real-time JSON-RPC bridge between browser apps and MCP tool servers
 - **Session Persistence**: Message queuing during disconnects, automatic reconnection, deferred tool result delivery
 - **structuredContent Support**: Full MCP spec compliance including structured content extraction and forwarding
+
+### Execution Plans (Powered by chuk-ai-planner)
+- **Plan Creation**: Generate execution plans from natural language descriptions using LLM-based plan agents
+- **Model-Driven Planning**: With `--plan-tools`, the LLM autonomously decides when to plan — calls `plan_create_and_execute` for complex multi-step tasks, uses regular tools for simple ones
+- **DAG Execution**: Plans are directed acyclic graphs — independent steps run in parallel batches, dependent steps wait
+- **Variable Resolution**: Step outputs bind to variables (`result_variable`), referenced by later steps as `${var}` or `${var.field}`
+- **Dry-Run Mode**: Trace what a plan would do without executing any tools — safe for production
+- **Checkpointing**: Execution state saved after each batch; resume interrupted plans without re-running completed steps
+- **Guard Integration**: Plans share budget and per-tool limits with the conversation — no bypass
+- **Re-planning**: On step failure, optionally invoke the LLM to generate a revised plan for remaining work
+- **DAG Visualization**: ASCII rendering shows dependency structure, batch grouping, and parallel markers
+- **Persistence**: Plans stored as JSON at `~/.mcp-cli/plans/`
 
 ### Advanced Configuration Management
 - **Environment Integration**: API keys and settings via environment variables
@@ -120,11 +170,18 @@ MCP CLI supports all providers and models from CHUK-LLM, including cutting-edge 
 
 Comprehensive documentation is available in the `docs/` directory:
 
+### Project
+- **[Architecture](architecture.md)** - 15 design principles, module layout, and coding conventions
+- **[Roadmap](roadmap.md)** - Vision, completed tiers (1-5), and planned tiers (6-12: plans, traces, skills, scheduling, multi-agent, remote sessions)
+
 ### Core Documentation
 - **[Commands System](docs/COMMANDS.md)** - Complete guide to the unified command system, patterns, and usage across all modes
 - **[Token Management](docs/TOKEN_MANAGEMENT.md)** - Comprehensive token management for providers and servers including OAuth, bearer tokens, and API keys
 
 ### Specialized Documentation
+- **[Execution Plans](docs/PLANNING.md)** - Plan creation, parallel execution, variable resolution, checkpointing, guards, and re-planning
+- **[Dashboard](docs/DASHBOARD.md)** - Real-time browser UI with agent terminal, activity stream, and file uploads
+- **[Attachments](docs/ATTACHMENTS.md)** - Multi-modal file attachments: images, text, audio, and browser upload
 - **[MCP Apps](docs/MCP_APPS.md)** - Interactive browser UIs served by MCP servers (SEP-1865)
 - **[OAuth Authentication](docs/OAUTH.md)** - OAuth flows, storage backends, and MCP server integration
 - **[Streaming Integration](docs/STREAMING.md)** - Real-time response streaming architecture
@@ -251,6 +308,13 @@ Global options available for all modes and commands:
 - `--verbose`: Enable detailed logging
 - `--quiet`: Suppress non-essential output
 - `--log-file`: Write debug logs to a rotating file (secrets auto-redacted)
+- `--vm`: [Experimental] Enable AI virtual memory for context management
+- `--vm-budget`: Token budget for conversation events in VM mode (default: 128000, on top of system prompt)
+- `--vm-mode`: VM mode — `passive` (default), `relaxed`, or `strict`
+- `--dashboard`: Launch a real-time browser dashboard UI alongside chat mode
+- `--attach`: Attach files to the first message (repeatable: `--attach img.png --attach code.py`)
+- `--plan-tools`: Enable model-driven planning — the LLM autonomously creates and executes multi-step plans
+- `--no-tools`: Disable MCP tool calling entirely — chat directly with the LLM without connecting to any MCP servers
 
 ### Environment Variables
 
@@ -293,6 +357,12 @@ mcp-cli --server sqlite --model qwen2.5-coder
 # Switch to cloud providers (requires API keys)
 mcp-cli chat --server sqlite --provider openai --model gpt-5
 mcp-cli chat --server sqlite --provider anthropic --model claude-4-5-sonnet
+
+# Launch with real-time browser dashboard
+mcp-cli --server sqlite --dashboard
+
+# Attach files to the first message
+mcp-cli --server sqlite --attach image.png --attach data.csv
 ```
 
 ### 2. Interactive Mode
@@ -488,6 +558,23 @@ mcp-cli --server sqlite --provider anthropic --model claude-4-5-opus
 
 **Note**: Servers added via `/server add` are stored in `~/.mcp-cli/preferences.json` and persist across sessions. Project servers remain in `server_config.json`.
 
+#### Multi-Modal Attachments
+```bash
+/attach image.png                  # Stage an image for the next message
+/attach code.py                    # Stage a text file
+/attach list                       # Show currently staged files
+/attach clear                      # Clear staged files
+/file data.csv                     # Alias for /attach
+/image screenshot.heic             # Alias for /attach
+
+# Inline file references (in any message)
+@file:screenshot.png describe what you see
+@file:data.csv summarize this data
+
+# Image URLs are auto-detected
+https://example.com/photo.jpg what is in this image?
+```
+
 #### Conversation Management
 ```bash
 /conversation                      # Show conversation history
@@ -573,6 +660,14 @@ See [Token Management Guide](docs/TOKEN_MANAGEMENT.md) for comprehensive documen
 - Concurrent execution with progress indicators
 - Verbose and compact display modes
 - Complete execution history and timing
+
+#### Multi-Modal Attachments
+- Attach images, text files, and audio to any message
+- `/attach` command with staging, list, and clear (aliases: `/file`, `/image`)
+- Inline `@file:path` references in any message
+- `--attach` CLI flag for first-message attachments
+- Browser "+" button with drag-and-drop and clipboard paste (with `--dashboard`)
+- Dashboard renders thumbnails, text previews, and audio players
 
 #### Provider Integration
 - Seamless switching between providers
@@ -1261,8 +1356,8 @@ Core dependencies are organized into feature groups:
 
 - **cli**: Terminal UI and command framework (Rich, Typer, chuk-term)
 - **dev**: Development tools, testing utilities, linting
-- **chuk-tool-processor v0.13+**: Production-grade tool execution with middleware, multiple execution strategies, and observability
-- **chuk-llm v0.16+**: Unified LLM provider with dynamic model discovery, capability-based selection, and llama.cpp integration for 52x faster imports and 112x faster client creation
+- **chuk-tool-processor v0.22+**: Production-grade tool execution with middleware, multiple execution strategies, and observability
+- **chuk-llm v0.17+**: Unified LLM provider with dynamic model discovery, capability-based selection, and llama.cpp integration
 - **chuk-term**: Enhanced terminal UI with themes, prompts, and cross-platform support
 
 Install with specific features:
@@ -1331,12 +1426,12 @@ pytest --cov=mcp_cli --cov-report=html
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
 - **[CHUK Tool Processor](https://github.com/chrishayuk/chuk-tool-processor)** - Production-grade async tool execution with middleware and observability
-- **[CHUK-LLM](https://github.com/chrishayuk/chuk-llm)** - Unified LLM provider with dynamic model discovery, llama.cpp integration, and GPT-5/Claude 4.5 support (v0.16+)
+- **[CHUK-LLM](https://github.com/chrishayuk/chuk-llm)** - Unified LLM provider with dynamic model discovery, llama.cpp integration, and GPT-5/Claude 4.5 support (v0.17+)
 - **[CHUK-Term](https://github.com/chrishayuk/chuk-term)** - Enhanced terminal UI with themes and cross-platform support
 - **[Rich](https://github.com/Textualize/rich)** - Beautiful terminal formatting
 - **[Typer](https://typer.tiangolo.com/)** - CLI framework

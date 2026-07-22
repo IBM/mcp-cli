@@ -6,6 +6,7 @@ Uses the existing enhanced provider commands from mcp_cli.commands.provider
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from mcp_cli.commands.base import (
@@ -17,6 +18,8 @@ from mcp_cli.commands.base import (
 
 if TYPE_CHECKING:
     from mcp_cli.commands.models.provider import ProviderStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderCommand(CommandGroup):
@@ -193,8 +196,8 @@ class ProviderListCommand(UnifiedCommand):
                                 default_model=info.get("default_model"),
                             )
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to list providers: %s", e)
 
             # Build table data with status info
             table_data = []
@@ -260,7 +263,8 @@ class ProviderListCommand(UnifiedCommand):
                 return ProviderStatus(
                     icon="❌", text="Not running", reason="Ollama server not responding"
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug("Ollama status check failed: %s", e)
                 return ProviderStatus(
                     icon="❌", text="Not available", reason="Ollama not installed"
                 )

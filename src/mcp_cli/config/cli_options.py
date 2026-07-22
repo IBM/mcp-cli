@@ -17,8 +17,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from chuk_term.ui import output
-
 from mcp_cli.config import (
     MCPConfig,
     setup_chuk_llm_environment,
@@ -158,17 +156,19 @@ def process_options(
         enabled_from_requested = []
         for server in user_specified:
             if pref_manager.is_server_disabled(server):
-                output.warning(f"Server '{server}' is disabled and cannot be used")
-                output.hint(
-                    f"To enable it, use: mcp-cli chat then /servers {server} enable"
+                logger.warning(
+                    "Server '%s' is disabled. To enable: mcp-cli chat then /servers %s enable",
+                    server,
+                    server,
                 )
             else:
                 enabled_from_requested.append(server)
         servers_list = enabled_from_requested
 
         if not servers_list and user_specified:
-            output.warning("All requested servers are disabled")
-            output.hint("Use 'mcp-cli servers' to see server status")
+            logger.warning(
+                "All requested servers are disabled. Use 'mcp-cli servers' to see status."
+            )
     else:
         # No specific servers requested - filter out disabled ones from preferences
         enabled_servers = []

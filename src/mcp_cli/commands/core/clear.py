@@ -5,12 +5,15 @@ Unified clear command implementation.
 
 from __future__ import annotations
 
+import logging
 
 from mcp_cli.commands.base import (
     UnifiedCommand,
     CommandMode,
     CommandResult,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ClearCommand(UnifiedCommand):
@@ -88,15 +91,16 @@ Aliases: cls
 
                     if tool_count is not None and tool_count > 0:
                         additional_info["Tools"] = str(tool_count)
-        except Exception:
+        except Exception as e:
             # Context not available, use ModelManager directly
+            logger.debug("Context not available for banner: %s", e)
             try:
                 model_manager = ModelManager()
                 provider = model_manager.get_active_provider()
                 model = model_manager.get_active_model()
-            except Exception:
+            except Exception as e2:
                 # Even ModelManager failed, use defaults
-                pass
+                logger.debug("ModelManager fallback also failed: %s", e2)
 
         # Display the welcome banner if we have provider and model
         if provider and model:

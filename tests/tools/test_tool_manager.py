@@ -871,7 +871,15 @@ class TestToolManagerInitializeAsync:
 
         # Mock StreamManager to avoid actual connection
         with patch("mcp_cli.tools.manager.StreamManager") as MockSM:
-            mock_sm = AsyncMock()
+            mock_sm = MagicMock()
+
+            # Async methods need to return proper coroutines for create_task
+            async def _noop(**kwargs):
+                return None
+
+            mock_sm.initialize_with_http_streamable = _noop
+            mock_sm.initialize_with_sse = _noop
+            mock_sm.initialize = AsyncMock()
             MockSM.return_value = mock_sm
 
             result = await tm._initialize_stream_manager("stdio")

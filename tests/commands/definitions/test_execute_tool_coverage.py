@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mcp_cli.commands.tools.execute_tool import ExecuteToolCommand, _to_serializable
+from mcp_cli.commands.tools.execute_tool import ExecuteToolCommand
+from mcp_cli.utils.serialization import to_serializable as _to_serializable
 from mcp_cli.tools.models import ToolCallResult
 
 

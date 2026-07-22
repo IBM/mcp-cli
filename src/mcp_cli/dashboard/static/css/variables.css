@@ -1,0 +1,35 @@
+/* ── Reset ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+/* ── Theme variables (overwritten by JS) ────────────────────────── */
+:root {
+  --dash-bg: #1e1e2e;
+  --dash-bg-surface: #262637;
+  --dash-bg-hover: #2e2e42;
+  --dash-fg: #e0e0e0;
+  --dash-fg-muted: #888899;
+  --dash-accent: #7aa2f7;
+  --dash-success: #9ece6a;
+  --dash-warning: #e0af68;
+  --dash-error: #f7768e;
+  --dash-info: #7dcfff;
+  --dash-border: #3b3b52;
+  --dash-font-mono: 'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+  --dash-font-ui: 'Inter',-apple-system,sans-serif;
+  --dash-font-size: 13px;
+  --dash-radius: 6px;
+  --dash-toolbar-height: 36px;
+  --dash-touch-target: 44px;
+  --dash-panel-min-height: 150px;
+}
+
+body {
+  background: var(--dash-bg);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-ui);
+  font-size: var(--dash-font-size);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}

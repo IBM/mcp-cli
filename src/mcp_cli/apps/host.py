@@ -36,12 +36,13 @@ from mcp_cli.config.defaults import (
     DEFAULT_APP_HOST_PORT_START,
     DEFAULT_APP_INIT_TIMEOUT,
     DEFAULT_APP_MAX_CONCURRENT,
+    DEFAULT_HTTP_REQUEST_TIMEOUT,
 )
 
 if TYPE_CHECKING:
     from mcp_cli.tools.manager import ToolManager
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Version injected into the host page
 _MCP_CLI_VERSION = "0.13"
@@ -58,6 +59,7 @@ class AppHostServer:
         self.tool_manager = tool_manager
         self._apps: dict[str, AppInfo] = {}
         self._bridges: dict[str, AppBridge] = {}
+        self._uri_to_tool: dict[str, str] = {}  # resourceUri → tool_name
         self._servers: list[Any] = []
         self._next_port = DEFAULT_APP_HOST_PORT_START
 
@@ -71,6 +73,8 @@ class AppHostServer:
         resource_uri: str,
         server_name: str,
         tool_result: Any = None,
+        open_browser: bool = True,
+        view_url: str | None = None,
     ) -> AppInfo:
         """Launch an MCP App in the browser.
 
@@ -78,10 +82,13 @@ class AppHostServer:
         2. Start a local HTTP + WebSocket server
         3. Open the user's default browser
         4. Push the initial tool result once the WebSocket connects
+
+        ``view_url`` is an optional direct HTTPS fallback used when
+        ``resources/read`` for the ``resource_uri`` fails.
         """
         # Close any previous instance of this tool's app
         if tool_name in self._apps:
-            log.info("Closing previous instance of app %s", tool_name)
+            logger.info("Closing previous instance of app %s", tool_name)
             await self.close_app(tool_name)
 
         if len(self._apps) >= DEFAULT_APP_MAX_CONCURRENT:
@@ -102,6 +109,27 @@ class AppHostServer:
                 resource_uri, server_name=server_name
             )
             html_content = self._extract_html(resource)
+
+            # Fallback: retry without server filter (server may be registered
+            # under a different transport name than the tool namespace).
+            if not html_content and server_name:
+                logger.debug(
+                    "Retrying resource %s without server filter (was: %s)",
+                    resource_uri,
+                    server_name,
+                )
+                resource = await self.tool_manager.read_resource(resource_uri)
+                html_content = self._extract_html(resource)
+
+        # Last resort: use viewUrl (direct HTTPS) if resources/read failed.
+        if not html_content and view_url:
+            logger.info(
+                "resources/read failed for %s, falling back to viewUrl %s",
+                resource_uri,
+                view_url,
+            )
+            html_content, resource = await self._fetch_http_resource(view_url)
+            resource_uri = view_url  # update URI for app info
 
         if not html_content:
             raise RuntimeError(
@@ -126,6 +154,7 @@ class AppHostServer:
             permissions=permissions,
         )
         self._apps[tool_name] = app_info
+        self._uri_to_tool[resource_uri] = tool_name
 
         # Create bridge
         bridge = AppBridge(app_info, self.tool_manager)
@@ -135,12 +164,12 @@ class AppHostServer:
         await self._start_server(app_info, bridge, tool_result)
 
         # Open browser
-        if DEFAULT_APP_AUTO_OPEN_BROWSER:
+        if open_browser and DEFAULT_APP_AUTO_OPEN_BROWSER:
             try:
                 webbrowser.open(app_info.url)
-                log.info("Opened MCP App for %s at %s", tool_name, app_info.url)
+                logger.info("Opened MCP App for %s at %s", tool_name, app_info.url)
             except Exception as e:
-                log.warning(
+                logger.warning(
                     "Could not open browser for app %s at %s: %s",
                     tool_name,
                     app_info.url,
@@ -152,6 +181,8 @@ class AppHostServer:
     async def close_app(self, tool_name: str) -> None:
         """Close a specific app and its server."""
         if tool_name in self._apps:
+            uri = self._apps[tool_name].resource_uri
+            self._uri_to_tool.pop(uri, None)
             self._apps[tool_name].state = AppState.CLOSED
             del self._apps[tool_name]
         self._bridges.pop(tool_name, None)
@@ -168,9 +199,10 @@ class AppHostServer:
                 server.close()
                 await server.wait_closed()
             except Exception as e:
-                log.debug("Error cleaning up app server: %s", e)
+                logger.debug("Error cleaning up app server: %s", e)
         self._apps.clear()
         self._bridges.clear()
+        self._uri_to_tool.clear()
         self._next_port = DEFAULT_APP_HOST_PORT_START
 
     def get_running_apps(self) -> list[AppInfo]:
@@ -178,8 +210,38 @@ class AppHostServer:
         return [a for a in self._apps.values() if a.state != AppState.CLOSED]
 
     def get_bridge(self, tool_name: str) -> AppBridge | None:
-        """Get the bridge for a running app."""
+        """Get the bridge for a running app by tool name."""
         return self._bridges.get(tool_name)
+
+    def get_bridge_by_uri(self, resource_uri: str) -> AppBridge | None:
+        """Get the bridge for a running app by its resource URI.
+
+        Multiple tools can share the same resourceUri (e.g. show_video and
+        play_video both point at the dashboard).  This lookup lets the host
+        reuse the existing app instance instead of launching a new one.
+        """
+        tool_name = self._uri_to_tool.get(resource_uri)
+        if tool_name:
+            return self._bridges.get(tool_name)
+        return None
+
+    def get_any_ready_bridge(self) -> AppBridge | None:
+        """Get a bridge for any running app (preferring READY state).
+
+        Used to route ui_patch results from tools that don't carry a
+        resourceUri themselves — the patch targets a panel inside an
+        already-running dashboard.
+        """
+        # Prefer a READY app
+        for tool_name, app in self._apps.items():
+            if app.state == AppState.READY:
+                bridge = self._bridges.get(tool_name)
+                if bridge is not None:
+                    return bridge
+        # Fall back to any bridge (may still be INITIALIZING)
+        for bridge in self._bridges.values():
+            return bridge
+        return None
 
     # ------------------------------------------------------------------ #
     #  Server setup                                                       #
@@ -230,13 +292,38 @@ class AppHostServer:
             init_timeout=DEFAULT_APP_INIT_TIMEOUT,
         )
         host_page_bytes = host_page.encode("utf-8")
-        app_html_bytes = app_info.html_content.encode("utf-8")
+
+        # Inject viewport-filling CSS into the app HTML.  MCP App views
+        # are often designed for Claude.ai's inline display (fixed aspect
+        # ratio).  When hosted inside an iframe panel, the root element
+        # chain needs to fill 100% height so canvas-based apps (Chart.js,
+        # Leaflet, D3) can use the available space.
+        app_html = app_info.html_content
+        _fill_css = (
+            "<style>"
+            "html,body{width:100%;height:100%;margin:0;overflow:auto}"
+            "#root,#app,[data-reactroot]{width:100%;height:100%}"
+            "#root>div,#app>div,[data-reactroot]>div"
+            "{width:100%;height:100%;display:flex;flex-direction:column}"
+            "canvas{max-width:100%!important;max-height:100%!important}"
+            "</style>"
+        )
+        if "</head>" in app_html:
+            app_html = app_html.replace("</head>", _fill_css + "</head>", 1)
+        elif "<body" in app_html:
+            app_html = app_html.replace("<body", _fill_css + "<body", 1)
+        else:
+            app_html = _fill_css + app_html
+        app_html_bytes = app_html.encode("utf-8")
 
         # HTTP handler — serves the host page and app HTML
         def process_request(
             connection: ServerConnection, request: Request
         ) -> Response | None:
-            if request.path == "/" or request.path == "":
+            # Strip query string for path matching (?embedded=1 etc.)
+            path = request.path.split("?", 1)[0]
+
+            if path == "/" or path == "":
                 return Response(
                     http.HTTPStatus.OK,
                     "OK",
@@ -248,7 +335,7 @@ class AppHostServer:
                     ),
                     host_page_bytes,
                 )
-            if request.path == "/app":
+            if path == "/app":
                 return Response(
                     http.HTTPStatus.OK,
                     "OK",
@@ -260,7 +347,7 @@ class AppHostServer:
                     ),
                     app_html_bytes,
                 )
-            if request.path != "/ws":
+            if path != "/ws":
                 body = b"Not Found"
                 return Response(
                     http.HTTPStatus.NOT_FOUND,
@@ -279,7 +366,7 @@ class AppHostServer:
         # WebSocket handler
         async def ws_handler(ws: ServerConnection) -> None:
             bridge.set_ws(ws)
-            log.info("WebSocket connected for app %s", app_info.tool_name)
+            logger.info("WebSocket connected for app %s", app_info.tool_name)
 
             # Drain any notifications that queued while WS was disconnected
             await bridge.drain_pending()
@@ -293,7 +380,7 @@ class AppHostServer:
             except websockets.ConnectionClosed:
                 pass
 
-            log.info("WebSocket closed for app %s", app_info.tool_name)
+            logger.info("WebSocket closed for app %s", app_info.tool_name)
 
         server = await ws_serve(
             ws_handler,
@@ -303,7 +390,7 @@ class AppHostServer:
         )
         self._servers.append(server)
 
-        log.info(
+        logger.info(
             "MCP App server started for %s on port %d",
             app_info.tool_name,
             app_info.port,
@@ -337,7 +424,9 @@ class AppHostServer:
         """Fetch HTML content directly from an HTTP/HTTPS URL."""
         import httpx
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=DEFAULT_HTTP_REQUEST_TIMEOUT
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             html = resp.text

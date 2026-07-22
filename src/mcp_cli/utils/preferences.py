@@ -13,6 +13,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from mcp_cli.config.defaults import DEFAULT_CONFIG_DIR
+
 
 class Theme(str, Enum):
     """Available UI themes from chuk-term."""
@@ -192,7 +194,7 @@ class PreferenceManager:
         Args:
             config_dir: Optional custom config directory, defaults to ~/.mcp-cli
         """
-        self.config_dir = config_dir or Path.home() / ".mcp-cli"
+        self.config_dir = config_dir or Path(DEFAULT_CONFIG_DIR).expanduser()
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.preferences_file = self.config_dir / "preferences.json"
         self.preferences = self.load_preferences()

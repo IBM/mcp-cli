@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Browser</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+:root {
+  --dash-bg: #1e1e2e; --dash-bg-surface: #262637; --dash-bg-hover: #2e2e42;
+  --dash-fg: #e0e0e0; --dash-fg-muted: #888899;
+  --dash-accent: #7aa2f7; --dash-success: #9ece6a; --dash-warning: #e0af68;
+  --dash-error: #f7768e; --dash-info: #7dcfff; --dash-border: #3b3b52;
+  --dash-font-mono: 'JetBrains Mono','Fira Code',monospace;
+  --dash-font-ui: 'Inter',-apple-system,sans-serif;
+  --dash-font-size: 13px; --dash-radius: 6px; --dash-spacing: 8px;
+}
+body {
+  background: var(--dash-bg);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-ui);
+  font-size: var(--dash-font-size);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Search bar */
+#search-bar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--dash-bg-surface);
+  border-bottom: 1px solid var(--dash-border);
+  flex-shrink: 0;
+}
+#search-bar input {
+  flex: 1;
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  color: var(--dash-fg);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: var(--dash-font-ui);
+  outline: none;
+}
+#search-bar input:focus { border-color: var(--dash-accent); }
+#tool-count {
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  align-self: center;
+  white-space: nowrap;
+}
+
+/* Tool list */
+#tools {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#tools::-webkit-scrollbar { width: 6px; }
+#tools::-webkit-scrollbar-track { background: transparent; }
+#tools::-webkit-scrollbar-thumb { background: var(--dash-border); border-radius: 3px; }
+
+/* Server group */
+.server-group {
+  margin-bottom: 4px;
+}
+.server-group-header {
+  font-size: 10px;
+  color: var(--dash-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 6px 4px 2px;
+  border-bottom: 1px solid var(--dash-border);
+  margin-bottom: 4px;
+}
+
+/* Tool card */
+.tool-card {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-left: 3px solid var(--dash-accent);
+  border-radius: var(--dash-radius);
+  overflow: hidden;
+}
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.tool-header:hover { background: var(--dash-bg-hover); }
+.tool-name {
+  font-family: var(--dash-font-mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--dash-accent);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-tags {
+  display: flex;
+  gap: 4px;
+}
+.tool-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--dash-bg);
+  color: var(--dash-fg-muted);
+  border: 1px solid var(--dash-border);
+}
+.tool-desc {
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  padding: 0 8px 6px;
+  line-height: 1.4;
+}
+
+/* Expanded detail */
+.tool-detail {
+  display: none;
+  padding: 8px;
+  border-top: 1px solid var(--dash-border);
+}
+.tool-card.expanded .tool-detail { display: block; }
+
+.schema-section {
+  margin-bottom: 8px;
+}
+.schema-section h4 {
+  font-size: 10px;
+  color: var(--dash-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+}
+.param-row {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid var(--dash-border);
+}
+.param-row:last-child { border-bottom: none; }
+.param-name {
+  font-family: var(--dash-font-mono);
+  color: var(--dash-accent);
+  min-width: 100px;
+}
+.param-type {
+  color: var(--dash-warning);
+  min-width: 60px;
+}
+.param-desc {
+  color: var(--dash-fg-muted);
+  flex: 1;
+}
+.param-req {
+  color: var(--dash-error);
+  font-size: 10px;
+}
+
+/* Try it form */
+.try-form {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--dash-bg);
+  border-radius: var(--dash-radius);
+}
+.try-form textarea {
+  width: 100%;
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-mono);
+  font-size: 11px;
+  padding: 6px;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+}
+.try-form textarea:focus { border-color: var(--dash-accent); }
+.try-form button {
+  margin-top: 4px;
+  background: var(--dash-accent);
+  color: var(--dash-bg);
+  border: none;
+  border-radius: var(--dash-radius);
+  padding: 6px 14px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--dash-font-ui);
+}
+.try-form button:hover { opacity: 0.9; }
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--dash-fg-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px;
+}
+
+/* ── Responsive: narrow panel / small screen ──────────────────── */
+#tools {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 400px) {
+  #search-bar { padding: 4px 6px; gap: 4px; }
+  #search-bar input { padding: 3px 6px; font-size: 12px; }
+  #tool-count { font-size: 10px; }
+  .tool-header { padding: 5px 6px; gap: 4px; }
+  .tool-name { font-size: 11px; }
+  .tool-tags { display: none; }
+  .tool-desc { font-size: 10px; padding: 0 6px 4px; line-height: 1.3; }
+  .server-group-header { font-size: 9px; padding: 4px 4px 2px; }
+  .tool-detail { padding: 6px; }
+  .schema-section h4 { font-size: 9px; }
+  .param-row {
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+  }
+  .param-name { min-width: unset; font-size: 10px; }
+  .param-type { min-width: unset; font-size: 10px; }
+  .param-desc { font-size: 10px; }
+  .try-form textarea { min-height: 50px; font-size: 12px; }
+  .try-form button { padding: 8px 16px; font-size: 12px; }
+}
+
+@media (pointer: coarse) {
+  .tool-header { min-height: 44px; padding: 8px 10px; }
+  .try-form button { min-height: 44px; }
+  #search-bar input { min-height: 36px; font-size: 14px; }
+}
+</style>
+</head>
+<body>
+
+<div id="search-bar">
+  <input type="text" id="search-input" placeholder="Search tools…">
+  <span id="tool-count"></span>
+</div>
+
+<div id="tools">
+  <div class="empty-state">Waiting for tool registry…</div>
+</div>
+
+<script>
+'use strict';
+
+const PROTOCOL = 'mcp-dashboard';
+const VERSION  = 1;
+
+const toolsEl     = document.getElementById('tools');
+const searchInput = document.getElementById('search-input');
+const toolCountEl = document.getElementById('tool-count');
+
+let allTools = [];
+let filterText = '';
+
+// ── postMessage handler ─────────────────────────────────────────
+window.addEventListener('message', (evt) => {
+  const msg = evt.data;
+  if (!msg || msg.protocol !== PROTOCOL) return;
+
+  switch (msg.type) {
+    case 'INIT':
+      applyTheme(msg.payload.theme || {});
+      sendReady();
+      break;
+    case 'THEME':
+      applyTheme(msg.payload);
+      break;
+    case 'TOOL_REGISTRY':
+      allTools = msg.payload.tools || [];
+      render();
+      break;
+    case 'TOOL_RESULT':
+      handleToolResult(msg.payload);
+      break;
+  }
+});
+
+function getShell() {
+  if (window.parent !== window) return window.parent;
+  if (window.opener) return window.opener;
+  return null;
+}
+
+function sendReady() {
+  const shell = getShell();
+  if (!shell) return;
+  shell.postMessage({
+    protocol: PROTOCOL, version: VERSION,
+    type: 'READY',
+    payload: { name: 'Tool Browser', icon: 'tools', accepts: ['TOOL_REGISTRY', 'TOOL_RESULT'], version: 1 }
+  }, '*');
+}
+
+// ── Theme ───────────────────────────────────────────────────────
+function applyTheme(t) {
+  const r = document.documentElement;
+  const set = (k, v) => v && r.style.setProperty(k, v);
+  set('--dash-bg', t.bg); set('--dash-bg-surface', t.bg_surface);
+  set('--dash-bg-hover', t.bg_hover); set('--dash-fg', t.fg);
+  set('--dash-fg-muted', t.fg_muted); set('--dash-accent', t.accent);
+  set('--dash-success', t.success); set('--dash-warning', t.warning);
+  set('--dash-error', t.error); set('--dash-info', t.info);
+  set('--dash-border', t.border); set('--dash-font-mono', t.font_mono);
+  set('--dash-font-ui', t.font_ui); set('--dash-font-size', t.font_size);
+  set('--dash-radius', t.radius); set('--dash-spacing', t.spacing);
+}
+
+// ── Render ──────────────────────────────────────────────────────
+function render() {
+  toolsEl.innerHTML = '';
+  const filtered = filterText
+    ? allTools.filter(t => {
+        const hay = `${t.name} ${t.namespace} ${t.description || ''} ${(t.tags||[]).join(' ')}`.toLowerCase();
+        return hay.includes(filterText);
+      })
+    : allTools;
+
+  toolCountEl.textContent = `${filtered.length}/${allTools.length} tools`;
+
+  if (!filtered.length) {
+    toolsEl.innerHTML = `<div class="empty-state">${allTools.length ? 'No matching tools' : 'No tools available'}</div>`;
+    return;
+  }
+
+  // Group by namespace
+  const groups = new Map();
+  for (const t of filtered) {
+    const ns = t.namespace || 'unknown';
+    if (!groups.has(ns)) groups.set(ns, []);
+    groups.get(ns).push(t);
+  }
+
+  for (const [ns, tools] of groups) {
+    const group = document.createElement('div');
+    group.className = 'server-group';
+    group.innerHTML = `<div class="server-group-header">${esc(ns)} (${tools.length})</div>`;
+    for (const t of tools) {
+      group.appendChild(buildToolCard(t));
+    }
+    toolsEl.appendChild(group);
+  }
+}
+
+function buildToolCard(tool) {
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+
+  const tags = (tool.tags || []).map(t => `<span class="tool-tag">${esc(t)}</span>`).join('');
+
+  card.innerHTML = `
+    <div class="tool-header">
+      <span class="tool-name">${esc(tool.name)}</span>
+      <div class="tool-tags">${tags}</div>
+    </div>
+    ${tool.description ? `<div class="tool-desc">${esc(tool.description)}</div>` : ''}
+    <div class="tool-detail">
+      ${buildSchemaSection(tool)}
+      <div class="try-form">
+        <textarea placeholder='{"key": "value"}'>{}</textarea>
+        <button data-tool="${esc(tool.name)}">Run Tool</button>
+      </div>
+    </div>
+  `;
+
+  card.querySelector('.tool-header').addEventListener('click', () => card.classList.toggle('expanded'));
+  card.querySelector('.try-form button').addEventListener('click', () => {
+    const textarea = card.querySelector('.try-form textarea');
+    try {
+      const args = JSON.parse(textarea.value || '{}');
+      executeTool(tool.name, args);
+    } catch (e) {
+      notify('error', 'Invalid JSON arguments');
+    }
+  });
+
+  return card;
+}
+
+function buildSchemaSection(tool) {
+  const params = tool.parameters;
+  if (!params || !params.properties || Object.keys(params.properties).length === 0) {
+    return '<div class="schema-section"><h4>Parameters</h4><div style="font-size:11px;color:var(--dash-fg-muted)">No parameters</div></div>';
+  }
+
+  const required = new Set(params.required || []);
+  let rows = '';
+  for (const [name, schema] of Object.entries(params.properties)) {
+    const type = schema.type || 'any';
+    const desc = schema.description || '';
+    const req = required.has(name) ? '<span class="param-req">required</span>' : '';
+    rows += `<div class="param-row">
+      <span class="param-name">${esc(name)}</span>
+      <span class="param-type">${esc(type)}</span>
+      <span class="param-desc">${esc(desc)} ${req}</span>
+    </div>`;
+  }
+
+  return `<div class="schema-section"><h4>Parameters</h4>${rows}</div>`;
+}
+
+function executeTool(toolName, args) {
+  const shell = getShell();
+  if (!shell) return;
+  shell.postMessage({
+    protocol: PROTOCOL, version: VERSION,
+    type: 'REQUEST_TOOL',
+    payload: { tool_name: toolName, arguments: args, call_id: `try-${Date.now()}` }
+  }, '*');
+  notify('info', `Executing ${toolName}…`);
+}
+
+function handleToolResult(payload) {
+  if (!payload.call_id || !payload.call_id.startsWith('try-')) return;
+  const ok = payload.success !== false;
+  notify(ok ? 'success' : 'error', `${payload.tool_name}: ${ok ? 'success' : (payload.error || 'failed')}`);
+}
+
+function notify(level, message) {
+  const shell = getShell();
+  if (!shell) return;
+  shell.postMessage({
+    protocol: PROTOCOL, version: VERSION,
+    type: 'NOTIFY',
+    payload: { level, message }
+  }, '*');
+}
+
+// ── Search ──────────────────────────────────────────────────────
+searchInput.addEventListener('input', () => {
+  filterText = searchInput.value.toLowerCase();
+  render();
+});
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+sendReady();
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@ from mcp_cli.chat.session_store import SessionStore, SessionData, SessionMetadat
 @pytest.fixture
 def store(tmp_path):
     """Session store with temporary directory."""
-    return SessionStore(sessions_dir=tmp_path)
+    return SessionStore(sessions_dir=tmp_path, agent_id="test-agent")
 
 
 @pytest.fixture
@@ -114,6 +114,69 @@ class TestSessionStore:
         path = store.save(data)
         # Path should be within sessions_dir
         assert str(store.sessions_dir) in str(path)
+
+
+class TestAgentNamespacing:
+    def test_agent_id_in_metadata(self, store, sample_data):
+        """Saved sessions carry agent_id in metadata."""
+        sample_data.metadata.agent_id = "test-agent"
+        store.save(sample_data)
+        loaded = store.load("test-abc123")
+        assert loaded is not None
+        assert loaded.metadata.agent_id == "test-agent"
+
+    def test_agent_namespacing(self, tmp_path):
+        """Two stores with different agent_ids use isolated directories."""
+        store_a = SessionStore(sessions_dir=tmp_path, agent_id="agent-a")
+        store_b = SessionStore(sessions_dir=tmp_path, agent_id="agent-b")
+
+        data_a = SessionData(
+            metadata=SessionMetadata(session_id="shared-id", agent_id="agent-a"),
+            messages=[{"role": "user", "content": "from A"}],
+        )
+        data_b = SessionData(
+            metadata=SessionMetadata(session_id="shared-id", agent_id="agent-b"),
+            messages=[{"role": "user", "content": "from B"}],
+        )
+        store_a.save(data_a)
+        store_b.save(data_b)
+
+        loaded_a = store_a.load("shared-id")
+        loaded_b = store_b.load("shared-id")
+        assert loaded_a is not None and loaded_b is not None
+        assert loaded_a.messages[0]["content"] == "from A"
+        assert loaded_b.messages[0]["content"] == "from B"
+
+        # Each store only sees its own session
+        assert len(store_a.list_sessions()) == 1
+        assert len(store_b.list_sessions()) == 1
+
+    def test_backward_compat_migration(self, tmp_path):
+        """Sessions in the flat root dir are auto-migrated on load."""
+        # Write a session file directly to the flat root (legacy layout)
+        legacy_data = SessionData(
+            metadata=SessionMetadata(session_id="legacy-sess", provider="openai"),
+            messages=[{"role": "user", "content": "old"}],
+        )
+        legacy_path = tmp_path / "legacy-sess.json"
+        legacy_path.write_text(legacy_data.model_dump_json(indent=2), encoding="utf-8")
+
+        # Create a namespaced store and try to load
+        store = SessionStore(sessions_dir=tmp_path, agent_id="default")
+        loaded = store.load("legacy-sess")
+        assert loaded is not None
+        assert loaded.metadata.session_id == "legacy-sess"
+
+        # Legacy file should be gone (migrated)
+        assert not legacy_path.exists()
+        # Now lives in the namespaced dir
+        assert (tmp_path / "default" / "legacy-sess.json").exists()
+
+    def test_sessions_dir_is_agent_scoped(self, tmp_path):
+        """SessionStore.sessions_dir points to the agent subdirectory."""
+        store = SessionStore(sessions_dir=tmp_path, agent_id="my-agent")
+        assert store.sessions_dir == tmp_path / "my-agent"
+        assert store.sessions_dir.exists()
 
 
 class TestAutoSave:

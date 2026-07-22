@@ -6,6 +6,7 @@ Unified token command implementation with all sub-actions.
 from __future__ import annotations
 
 import json
+import logging
 
 from chuk_term.ui import output, format_table
 from mcp_cli.auth import TokenManager, TokenStoreBackend, TokenStoreFactory
@@ -26,6 +27,8 @@ from mcp_cli.commands.models import (
     TokenClearParams,
     TokenProviderParams,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _get_token_manager() -> TokenManager:
@@ -48,7 +51,8 @@ def _get_token_manager() -> TokenManager:
         try:
             config = get_config()
             backend = TokenStoreBackend(config.token_store_backend)
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read token backend from config: %s", e)
             backend = TokenStoreBackend.AUTO
 
     return TokenManager(backend=backend, namespace=NAMESPACE, service_name="mcp-cli")

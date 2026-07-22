@@ -13,7 +13,10 @@ import asyncio
 import json
 import time
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mcp_cli.dashboard.bridge import DashboardBridge
 
 from pydantic import BaseModel, Field
 
@@ -226,18 +229,21 @@ class StreamingResponseHandler:
         self,
         display: StreamingDisplayManager,
         runtime_config: RuntimeConfig | None = None,
+        dashboard_bridge: "DashboardBridge | None" = None,
     ):
         """Initialize handler.
 
         Args:
             display: The unified display manager (required, no fallback)
             runtime_config: Runtime configuration (optional, will load defaults if not provided)
+            dashboard_bridge: Optional DashboardBridge for live token streaming to browser.
         """
         self.display = display
         self.tool_accumulator = ToolCallAccumulator()
         self._interrupted = False
         self._usage: dict[str, int] | None = None
         self.runtime_config = runtime_config or load_runtime_config()
+        self._dashboard_bridge = dashboard_bridge
 
     async def stream_response(
         self,
@@ -318,6 +324,13 @@ class StreamingResponseHandler:
                 f"Streaming complete: {len(final_content)} chars, "
                 f"{len(tool_calls)} tools, {elapsed:.2f}s"
             )
+
+            # Signal stream end to dashboard
+            if self._dashboard_bridge is not None:
+                try:
+                    await self._dashboard_bridge.on_token("", done=True)
+                except Exception as _e:
+                    logger.debug("Dashboard on_token(done) error: %s", _e)
 
             return response.to_dict()
 
@@ -425,22 +438,19 @@ class StreamingResponseHandler:
                         f"(first_chunk={not first_chunk_received}, "
                         f"after_tools={after_tool_calls})"
                     )
-                    # Display user-friendly error message
-                    from chuk_term.ui import output
-
                     if not first_chunk_received and after_tool_calls:
-                        output.error(
-                            f"\n⏱️  Streaming timeout after {effective_timeout:.0f}s waiting for first response after tool calls.\n"
-                            "The model may need more time to process tool results.\n"
-                            f"You can increase this with: MCP_STREAMING_FIRST_CHUNK_TIMEOUT={effective_timeout * 2:.0f}\n"
-                            f"Or set in config: timeouts.streamingFirstChunk = {effective_timeout * 2:.0f}"
+                        logger.warning(
+                            "Streaming timeout after %.0fs waiting for first response after tool calls. "
+                            "Increase with MCP_STREAMING_FIRST_CHUNK_TIMEOUT=%.0f",
+                            effective_timeout,
+                            effective_timeout * 2,
                         )
                     else:
-                        output.error(
-                            f"\n⏱️  Streaming timeout after {effective_timeout:.0f}s waiting for response.\n"
-                            "The model may be taking longer than expected to respond.\n"
-                            f"You can increase this timeout with: --tool-timeout {effective_timeout * 2:.0f}\n"
-                            f"Or set in config file: timeouts.streamingChunkTimeout = {effective_timeout * 2:.0f}"
+                        logger.warning(
+                            "Streaming timeout after %.0fs waiting for response. "
+                            "Increase with --tool-timeout %.0f",
+                            effective_timeout,
+                            effective_timeout * 2,
                         )
                     break
 
@@ -448,15 +458,12 @@ class StreamingResponseHandler:
         try:
             await asyncio.wait_for(stream_chunks(), timeout=global_timeout)
         except asyncio.TimeoutError:
-            logger.error(f"Global streaming timeout after {global_timeout}s")
-            # Display user-friendly error message
-            from chuk_term.ui import output
-
-            output.error(
-                f"\n⏱️  Global streaming timeout after {global_timeout:.0f}s.\n"
-                f"The total streaming time exceeded the maximum allowed.\n"
-                f"You can increase this timeout with: --tool-timeout {global_timeout * 2:.0f}\n"
-                f"Or set MCP_STREAMING_GLOBAL_TIMEOUT={global_timeout * 2:.0f}"
+            logger.error(
+                "Global streaming timeout after %.0fs. "
+                "Increase with --tool-timeout %.0f or MCP_STREAMING_GLOBAL_TIMEOUT=%.0f",
+                global_timeout,
+                global_timeout * 2,
+                global_timeout * 2,
             )
             self._interrupted = True
 
@@ -468,6 +475,27 @@ class StreamingResponseHandler:
         """
         # Use display to process chunk (normalizes format)
         await self.display.add_chunk(raw_chunk)
+
+        # Broadcast token to dashboard if connected
+        if self._dashboard_bridge is not None:
+            token: str | None = None
+            if "response" in raw_chunk:
+                token = raw_chunk["response"]
+            elif "content" in raw_chunk:
+                token = raw_chunk["content"]
+            elif "text" in raw_chunk:
+                token = raw_chunk["text"]
+            elif "delta" in raw_chunk and isinstance(raw_chunk["delta"], dict):
+                token = raw_chunk["delta"].get("content")
+            elif "choices" in raw_chunk and raw_chunk["choices"]:
+                delta = raw_chunk["choices"][0].get("delta", {})
+                if isinstance(delta, dict):
+                    token = delta.get("content")
+            if token:
+                try:
+                    await self._dashboard_bridge.on_token(token)
+                except Exception as _e:
+                    logger.debug("Dashboard on_token error: %s", _e)
 
         # Extract tool calls if present
         if "tool_calls" in raw_chunk and raw_chunk["tool_calls"]:
@@ -485,16 +513,13 @@ class StreamingResponseHandler:
         **kwargs,
     ) -> dict[str, Any]:
         """Fallback for non-streaming clients."""
-        from chuk_term.ui import output
-
         start_time = time.time()
 
-        with output.loading("Generating response..."):
-            # Try to call client
-            if hasattr(client, "complete"):
-                result = await client.complete(messages=messages, tools=tools, **kwargs)
-            else:
-                raise RuntimeError("Client has no streaming or completion method")
+        logger.debug("Non-streaming fallback: generating response...")
+        if hasattr(client, "complete"):
+            result = await client.complete(messages=messages, tools=tools, **kwargs)
+        else:
+            raise RuntimeError("Client has no streaming or completion method")
 
         elapsed = time.time() - start_time
 

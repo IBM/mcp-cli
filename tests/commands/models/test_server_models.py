@@ -195,3 +195,19 @@ class TestServerCapabilities:
         assert "Tools" in display
         assert "Events*" in display
         assert "Streaming*" in display
+
+
+class TestServerActionParamsValidatorBranch:
+    """Cover the validator raise path (line 46)."""
+
+    def test_output_format_validator_rejects_xml(self):
+        with pytest.raises(ValidationError):
+            ServerActionParams(output_format="xml")
+
+
+class TestServerPerformanceInfoValidatorBranch:
+    """Cover the validator raise path (line 90)."""
+
+    def test_ping_ms_validator_rejects_negative(self):
+        with pytest.raises(ValidationError):
+            ServerPerformanceInfo(icon="X", latency="bad", ping_ms=-1.0)

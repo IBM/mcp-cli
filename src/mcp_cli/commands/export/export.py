@@ -68,7 +68,7 @@ Default filenames: chat-<session_id>.md / .json
 
         chat_context = kwargs.get("chat_context")
         if not chat_context:
-            return CommandResult(success=False, message="No chat context available.")
+            return CommandResult(success=False, error="No chat context available.")
 
         # Parse arguments
         args = kwargs.get("args", "").strip().split()
@@ -83,11 +83,11 @@ Default filenames: chat-<session_id>.md / .json
                 m.to_dict() if hasattr(m, "to_dict") else m for m in raw_messages
             ]
         except Exception as e:
-            return CommandResult(success=False, message=f"Failed to get history: {e}")
+            return CommandResult(success=False, error=f"Failed to get history: {e}")
 
         if not messages:
             output.info("No messages to export.")
-            return CommandResult(success=True, message="No messages to export.")
+            return CommandResult(success=True, output="No messages to export.")
 
         # Build metadata
         metadata = {
@@ -123,6 +123,6 @@ Default filenames: chat-<session_id>.md / .json
             path = Path(filename)
             path.write_text(content, encoding="utf-8")
             output.success(f"Exported to {path.resolve()}")
-            return CommandResult(success=True, message=f"Exported to {path}")
+            return CommandResult(success=True, output=f"Exported to {path}")
         except Exception as e:
-            return CommandResult(success=False, message=f"Failed to write file: {e}")
+            return CommandResult(success=False, error=f"Failed to write file: {e}")

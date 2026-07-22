@@ -209,7 +209,8 @@ def validate_provider_exists(provider: str) -> bool:
         config = get_config()
         config.get_provider(provider)  # This will raise if not found
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug("Provider validation failed for %s: %s", provider, e)
         return False
 
 

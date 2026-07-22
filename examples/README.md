@@ -12,6 +12,7 @@ examples/
   commands/              Command system and slash commands
   servers/               Server management and custom providers
   apps/                  MCP Apps (SEP-1865) interactive UI demos
+  planning/              Plan execution, parallel batches, guards
   safety/                Context safety mechanisms (Tier 1)
   sample_tools/          Reusable tool classes for demos
 ```
@@ -123,6 +124,61 @@ Demonstrates:
 4. Host page serving a sandboxed iframe with WebSocket communication
 5. Full `ui/initialize` handshake and tool call round-trip
 
+## Planning (Tier 6)
+
+Execution plans — reproducible, inspectable, parallelizable tool call graphs.
+
+### Self-Contained Demos (no API key needed)
+
+```bash
+# Plan basics: create, inspect, save, load, delete, DAG visualization
+uv run python examples/planning/plan_basics_demo.py
+
+# Plan execution: dry-run, live execution, variable resolution, checkpoints, failure handling
+uv run python examples/planning/plan_execution_demo.py
+
+# Parallel execution: topological batching, concurrent steps, timing evidence
+uv run python examples/planning/plan_parallel_demo.py
+
+# Guard integration: budget limits, per-tool caps, result recording, error handling
+uv run python examples/planning/plan_guard_demo.py
+```
+
+### LLM-Integrated Demos (requires OPENAI_API_KEY)
+
+```bash
+# Full pipeline: LLM generates plan from natural language → validate → visualize → execute
+uv run python examples/planning/plan_llm_demo.py
+
+# Use a different model
+uv run python examples/planning/plan_llm_demo.py --model gpt-4o
+
+# Custom task description
+uv run python examples/planning/plan_llm_demo.py --prompt "fetch weather for 3 cities and compare"
+
+# Plan-as-a-Tool (Tier 6.8): The LLM decides WHEN to plan — uses plan_create_and_execute
+# for complex multi-step tasks, calls tools directly for simple ones
+uv run python examples/planning/plan_as_tool_demo.py
+
+# Custom task
+uv run python examples/planning/plan_as_tool_demo.py --prompt "read the config and run tests"
+```
+
+Demonstrates:
+1. PlanningContext initialization and PlanRegistry round-trips (save/load/delete)
+2. DAG visualization with status indicators and parallel markers
+3. Dry-run mode (trace without executing)
+4. Parallel batch execution (independent steps run concurrently)
+5. Variable resolution (`${var}`, `${var.field}`, template strings)
+6. Execution checkpointing and resume support
+7. Step failure handling with checkpoint persistence
+8. Guard integration (pre-execution blocking, post-execution recording)
+9. MCP content block extraction
+10. Fan-out, diamond, and wide pipeline DAG patterns with timing evidence
+11. LLM plan generation with PlanAgent (auto-retry on validation failure)
+12. End-to-end pipeline: natural language → structured plan → parallel execution
+13. Model-driven planning: LLM autonomously invokes plan_create_and_execute when tasks need multi-step coordination
+
 ## Safety
 
 ### Tier 1: Context Safety
@@ -155,3 +211,27 @@ Demonstrates:
 6. Narrower exception handlers
 7. Provider validation at startup
 8. LLM-visible context management notices
+
+### AI Virtual Memory
+
+```bash
+# VM subsystem: budget enforcement, eviction, page lifecycle — no API key needed
+python examples/safety/vm_memory_management_demo.py
+
+# E2E recall scenarios: page_fault, search_pages, distractor tools — requires OPENAI_API_KEY
+python examples/safety/vm_relaxed_mode_demo.py
+
+# Server health monitoring + VM multimodal content — no API key needed
+python examples/safety/health_vm_multimodal_demo.py
+```
+
+Demonstrates:
+1. Health-check-on-failure and connection error diagnostics
+2. Background health polling lifecycle (start, transition detection, stop)
+3. `/health` command (all healthy, mixed, missing server)
+4. Multimodal page_fault — image pages as multi-block content (text + image_url)
+5. Text/structured page_fault with modality and compression metadata
+6. search_pages with hint-based matching and modality filtering
+7. `/memory page --download` — export text, JSON, and base64 image pages
+8. Multi-block content in HistoryMessage serialization
+9. Full VM lifecycle: eviction under pressure → search → fault → content blocks

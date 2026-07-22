@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from mcp_cli.config.defaults import DEFAULT_AGENT_ID, DEFAULT_SESSIONS_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +22,7 @@ class SessionMetadata(BaseModel):
     """Metadata for a saved session."""
 
     session_id: str
+    agent_id: str = DEFAULT_AGENT_ID
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -46,11 +49,19 @@ class SessionStore:
     Stores sessions as JSON files in a configurable directory.
     """
 
-    def __init__(self, sessions_dir: Path | None = None):
+    def __init__(
+        self,
+        sessions_dir: Path | None = None,
+        agent_id: str = DEFAULT_AGENT_ID,
+    ):
         if sessions_dir is None:
-            sessions_dir = Path.home() / ".mcp-cli" / "sessions"
-        self.sessions_dir = sessions_dir
+            sessions_dir = Path(DEFAULT_SESSIONS_DIR).expanduser()
+        self.agent_id = agent_id
+        # Agent-namespaced subdirectory
+        self.sessions_dir = sessions_dir / agent_id
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        # Keep reference to root for backward-compat migration
+        self._root_dir = sessions_dir
 
     def _session_path(self, session_id: str) -> Path:
         """Get the file path for a session."""
@@ -78,6 +89,9 @@ class SessionStore:
     def load(self, session_id: str) -> SessionData | None:
         """Load session data from disk.
 
+        If the file isn't found in the agent-namespaced directory, checks the
+        flat root directory for backward compatibility and auto-migrates.
+
         Args:
             session_id: Session ID to load
 
@@ -86,8 +100,12 @@ class SessionStore:
         """
         path = self._session_path(session_id)
         if not path.exists():
-            logger.warning(f"Session not found: {session_id}")
-            return None
+            # Backward-compat: check flat root directory and migrate
+            migrated = self._migrate_from_root(session_id)
+            if migrated is None:
+                logger.warning(f"Session not found: {session_id}")
+                return None
+            path = migrated
 
         try:
             raw = path.read_text(encoding="utf-8")
@@ -95,6 +113,26 @@ class SessionStore:
             return data
         except Exception as e:
             logger.error(f"Failed to load session {session_id}: {e}")
+            return None
+
+    def _migrate_from_root(self, session_id: str) -> Path | None:
+        """Check flat root dir for a legacy session file and migrate it.
+
+        Returns the new path if migration succeeded, None otherwise.
+        """
+        safe_id = session_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        legacy_path = self._root_dir / f"{safe_id}.json"
+        if not legacy_path.exists() or not legacy_path.is_file():
+            return None
+        dest = self._session_path(session_id)
+        try:
+            import shutil
+
+            shutil.move(str(legacy_path), str(dest))
+            logger.info(f"Migrated session {session_id} from flat dir to {dest}")
+            return dest
+        except Exception as e:
+            logger.warning(f"Failed to migrate session {session_id}: {e}")
             return None
 
     def list_sessions(self) -> list[SessionMetadata]:

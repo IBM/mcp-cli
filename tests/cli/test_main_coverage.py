@@ -11,6 +11,7 @@ import asyncio
 import os
 import signal
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -860,7 +861,7 @@ class TestThemeCommand:
 
         with patch("mcp_cli.adapters.cli.cli_execute", new_callable=AsyncMock):
             with patch("asyncio.run") as mock_asyncio_run:
-                mock_asyncio_run.return_value = None
+                mock_asyncio_run.side_effect = lambda coro: coro.close()
                 runner.invoke(app, ["theme", "--list"])
 
     @patch("mcp_cli.main.set_theme")
@@ -869,7 +870,7 @@ class TestThemeCommand:
 
         with patch("mcp_cli.adapters.cli.cli_execute", new_callable=AsyncMock):
             with patch("asyncio.run") as mock_asyncio_run:
-                mock_asyncio_run.return_value = None
+                mock_asyncio_run.side_effect = lambda coro: coro.close()
                 runner.invoke(app, ["theme", "dark"])
 
 
@@ -884,7 +885,7 @@ class TestTokenCommand:
         from mcp_cli.main import app
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = None
+            mock_run.side_effect = lambda coro: coro.close()
             runner.invoke(app, ["token", "list"])
 
     @patch("mcp_cli.main.set_theme")
@@ -892,7 +893,7 @@ class TestTokenCommand:
         from mcp_cli.main import app
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = None
+            mock_run.side_effect = lambda coro: coro.close()
             runner.invoke(app, ["token", "backends"])
 
 
@@ -907,7 +908,7 @@ class TestTokensCommand:
         from mcp_cli.main import app
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = None
+            mock_run.side_effect = lambda coro: coro.close()
             runner.invoke(app, ["tokens"])
 
     @patch("mcp_cli.main.set_theme")
@@ -915,7 +916,7 @@ class TestTokensCommand:
         from mcp_cli.main import app
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = None
+            mock_run.side_effect = lambda coro: coro.close()
             runner.invoke(app, ["tokens", "backends"])
 
 
@@ -936,7 +937,7 @@ class TestChatCommand:
 
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(app, ["chat"])
 
     @patch("mcp_cli.main.restore_terminal")
@@ -950,7 +951,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -971,7 +972,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -990,7 +991,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -1011,7 +1012,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -1038,7 +1039,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -1078,9 +1079,13 @@ class TestChatCommand:
     def test_chat_keyboard_interrupt(self, mock_opts, mock_theme, mock_restore, runner):
         from mcp_cli.main import app
 
+        def _raise_keyboard(coro):
+            coro.close()
+            raise KeyboardInterrupt
+
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
-            with patch("asyncio.run", side_effect=KeyboardInterrupt):
+            with patch("asyncio.run", side_effect=_raise_keyboard):
                 runner.invoke(app, ["chat"])
 
     @patch("mcp_cli.main.restore_terminal")
@@ -1089,9 +1094,13 @@ class TestChatCommand:
     def test_chat_timeout_error(self, mock_opts, mock_theme, mock_restore, runner):
         from mcp_cli.main import app
 
+        def _raise_timeout(coro):
+            coro.close()
+            raise asyncio.TimeoutError
+
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
-            with patch("asyncio.run", side_effect=asyncio.TimeoutError):
+            with patch("asyncio.run", side_effect=_raise_timeout):
                 runner.invoke(app, ["chat"])
 
     @patch("mcp_cli.main.restore_terminal")
@@ -1103,7 +1112,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -1142,7 +1151,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -1161,7 +1170,7 @@ class TestChatCommand:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(
                     app,
                     [
@@ -1193,7 +1202,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, [])
 
@@ -1208,7 +1217,7 @@ class TestMainCallback:
 
         with patch("mcp_cli.adapters.cli.cli_execute", new_callable=AsyncMock):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 runner.invoke(app, ["--provider", "list"])
 
     @patch("mcp_cli.main.restore_terminal")
@@ -1222,7 +1231,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--tool-timeout", "60"])
 
@@ -1237,7 +1246,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--init-timeout", "60"])
 
@@ -1252,7 +1261,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--token-backend", "keychain"])
 
@@ -1267,7 +1276,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--include-tools", "tool1,tool2"])
 
@@ -1282,7 +1291,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--exclude-tools", "tool1"])
 
@@ -1297,7 +1306,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--dynamic-tools"])
 
@@ -1312,7 +1321,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(
                         app,
@@ -1339,7 +1348,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(
                         app,
@@ -1364,7 +1373,7 @@ class TestMainCallback:
 
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     with patch.dict(os.environ, {"CUSTOM_API_KEY": "env-key"}):
                         runner.invoke(
@@ -1404,7 +1413,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--confirm-mode", "smart"])
 
@@ -1425,7 +1434,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--theme", "dark"])
 
@@ -1440,7 +1449,7 @@ class TestMainCallback:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(
                         app,
@@ -1464,7 +1473,10 @@ class TestMainCallback:
 
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
-            with patch("asyncio.run", side_effect=KeyboardInterrupt):
+            with patch(
+                "asyncio.run",
+                side_effect=_close_and_raise(KeyboardInterrupt()),
+            ):
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, [])
 
@@ -1476,7 +1488,10 @@ class TestMainCallback:
 
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
-            with patch("asyncio.run", side_effect=asyncio.TimeoutError):
+            with patch(
+                "asyncio.run",
+                side_effect=_close_and_raise(asyncio.TimeoutError()),
+            ):
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, [])
 
@@ -1490,7 +1505,7 @@ class TestRunProviderCommand:
     def test_run_provider_command_success(self):
         from mcp_cli.main import _run_provider_command
 
-        with patch("asyncio.run") as mock_run:
+        with patch("asyncio.run", side_effect=lambda coro: coro.close()) as mock_run:
             with patch("mcp_cli.main.initialize_context"):
                 _run_provider_command(["list"])
         mock_run.assert_called_once()
@@ -1499,7 +1514,10 @@ class TestRunProviderCommand:
         from mcp_cli.main import _run_provider_command
         from click.exceptions import Exit as ClickExit
 
-        with patch("mcp_cli.main.asyncio.run", side_effect=Exception("test error")):
+        with patch(
+            "mcp_cli.main.asyncio.run",
+            side_effect=_close_and_raise(Exception("test error")),
+        ):
             with patch("mcp_cli.main.initialize_context"):
                 with pytest.raises((SystemExit, ClickExit)):
                     _run_provider_command(["list"])
@@ -1570,6 +1588,17 @@ class TestSignalHandlers:
 # ---------------------------------------------------------------------------
 
 
+# Helper: side_effect for asyncio.run that closes the coroutine and raises
+def _close_and_raise(exc):
+    """Return a side_effect that closes the coroutine then raises *exc*."""
+
+    def _side_effect(coro):
+        coro.close()
+        raise exc
+
+    return _side_effect
+
+
 # Helper: side_effect for asyncio.run that actually runs the coroutine
 def _run_coro(coro):
     """Helper to actually run a coroutine passed to asyncio.run."""
@@ -1595,7 +1624,8 @@ class TestMainCallbackProviderRedirectError:
 
         with patch("mcp_cli.main.initialize_context"):
             with patch(
-                "mcp_cli.main.asyncio.run", side_effect=RuntimeError("test error")
+                "mcp_cli.main.asyncio.run",
+                side_effect=_close_and_raise(RuntimeError("test error")),
             ):
                 result = runner.invoke(app, ["--provider", "list"])
         # Should still exit (typer.Exit is raised after the finally block)
@@ -1620,7 +1650,7 @@ class TestMainCallbackModelOnlyBranch:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config"):
                     runner.invoke(app, ["--model", "gpt-4o"])
         # Verify get_active_provider was called (model-only branch)
@@ -1653,7 +1683,7 @@ class TestMainCallbackVerboseTimeouts:
 
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch("mcp_cli.config.load_runtime_config", return_value=mock_rc):
                     runner.invoke(app, ["--verbose"])
         # Verify get_all_timeouts was called
@@ -1936,7 +1966,7 @@ class TestChatCommandStartChatInner:
         mm = _make_model_manager()
         with patch("mcp_cli.model_management.ModelManager", return_value=mm):
             with patch("asyncio.run") as mock_asyncio:
-                mock_asyncio.return_value = None
+                mock_asyncio.side_effect = lambda coro: coro.close()
                 with patch.dict(os.environ, {"CUSTOM_API_KEY": "env-key"}):
                     runner.invoke(
                         app,
@@ -2425,7 +2455,7 @@ class TestMainBlock:
             capture_output=True,
             text=True,
             timeout=15,
-            cwd="/Users/christopherhay/chris-source/mcp-cli",
+            cwd=str(Path(__file__).resolve().parents[2]),
         )
         # It may succeed with help output or fail - either way the lines are covered
         # We just need the code path to be exercised

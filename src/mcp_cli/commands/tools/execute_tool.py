@@ -23,54 +23,8 @@ from mcp_cli.config.defaults import (
     JSON_TYPE_STRING,
 )
 from mcp_cli.tools.manager import ToolManager
+from mcp_cli.utils.serialization import to_serializable, unwrap_tool_result
 from chuk_term.ui import output
-
-
-def _to_serializable(obj: Any) -> Any:
-    """Convert an object to a JSON-serializable form.
-
-    Handles MCP SDK ToolResult, Pydantic models, and other non-serializable types.
-    """
-    # Handle None
-    if obj is None:
-        return None
-
-    # Handle primitives
-    if isinstance(obj, (str, int, float, bool)):
-        return obj
-
-    # Handle lists
-    if isinstance(obj, list):
-        return [_to_serializable(item) for item in obj]
-
-    # Handle dicts
-    if isinstance(obj, dict):
-        return {k: _to_serializable(v) for k, v in obj.items()}
-
-    # Handle Pydantic models (they have model_dump or dict method)
-    if hasattr(obj, "model_dump"):
-        return _to_serializable(obj.model_dump())
-    if hasattr(obj, "dict"):
-        return _to_serializable(obj.dict())
-
-    # Handle MCP SDK ToolResult (has content attribute)
-    if hasattr(obj, "content"):
-        content = obj.content
-        # Content is typically a list of TextContent/ImageContent objects
-        if isinstance(content, list):
-            result_parts = []
-            for item in content:
-                if hasattr(item, "text"):
-                    result_parts.append(item.text)
-                elif hasattr(item, "model_dump"):
-                    result_parts.append(_to_serializable(item.model_dump()))
-                else:
-                    result_parts.append(str(item))
-            return "\n".join(result_parts) if len(result_parts) == 1 else result_parts
-        return _to_serializable(content)
-
-    # Fallback to string representation
-    return str(obj)
 
 
 class ExecuteToolCommand(UnifiedCommand):
@@ -351,10 +305,10 @@ Tips:
 
                 if isinstance(result, ToolCallResult):
                     if result.success and result.result is not None:
-                        output.success("✅ Tool executed successfully")
                         # Extract the actual result from ToolCallResult
-                        # Use _to_serializable to handle MCP SDK types
-                        serializable_result = _to_serializable(result.result)
+                        # Unwrap middleware wrappers, then serialize
+                        serializable_result = to_serializable(unwrap_tool_result(result.result))
+                        output.success("✅ Tool executed successfully")
                         if isinstance(serializable_result, (dict, list)):
                             output.print(json.dumps(serializable_result, indent=2))
                         else:
@@ -395,8 +349,8 @@ Tips:
                     else:
                         output.warning("Tool returned no result")
                 elif isinstance(result, dict):  # type: ignore[unreachable]
+                    serializable_result = to_serializable(unwrap_tool_result(result))
                     output.success("✅ Tool executed successfully")
-                    serializable_result = _to_serializable(result)
                     output.print(json.dumps(serializable_result, indent=2))
                 else:
                     output.success("✅ Tool executed successfully")

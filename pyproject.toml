@@ -4,22 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-cli"
-version = "0.15"
+version = "0.20.0"
 description = "A cli for the Model Context Provider"
 requires-python = ">=3.11"
 readme = "README.md"
-authors = [
-  { name = "Chris Hay", email = "chrishayuk@somejunkmailbox.com" }
-]
+authors = []
 keywords = ["llm", "openai", "claude", "mcp", "cli"]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 dependencies = [
   "asyncio>=3.4.3",
-  "chuk-ai-session-manager>=0.9",
+  "chuk-ai-planner>=0.2",
+  "chuk-ai-session-manager>=0.11",
   "chuk-llm>=0.17.1",
   "chuk-mcp-client-oauth>=0.3.5",
-  "chuk-term>=0.3",
-  "chuk-tool-processor>=0.20.1",
+  "chuk-term>=0.4.2",
+  "chuk-tool-processor>=0.22.1",
   "cryptography>=44.0.0",
   "fast-json>=0.3.2",
   "httpx>=0.27.0",
@@ -38,6 +37,9 @@ vault = [
   "hvac>=2.0.0"
 ]
 apps = [
+  "websockets>=13.0"
+]
+dashboard = [
   "websockets>=13.0"
 ]
 wasm = []
@@ -60,7 +62,7 @@ where = ["src"]
 include = ["mcp_cli*"]
 
 [tool.setuptools.package-data]
-mcp_cli = ["server_config.json"]
+mcp_cli = ["server_config.json", "dashboard/static/**/*"]
 [dependency-groups]
 dev = [
   "colorama>=0.4.6",
@@ -75,6 +77,15 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: end-to-end tests requiring external MCP servers",
+]
+filterwarnings = [
+    "error::RuntimeWarning",
+    # Third-party deprecation warnings we can't fix
+    "ignore::pydantic.warnings.PydanticDeprecatedSince211",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince212",
+    "ignore:The 'is_flag' and 'flag_value' parameters:DeprecationWarning:typer",
+    "ignore:Pydantic serializer warnings:UserWarning:pydantic",
+    "ignore:datetime.datetime.utcnow:DeprecationWarning",
 ]
 
 [tool.mypy]
@@ -101,13 +112,10 @@ ignore_errors = true
 
 [tool.coverage.run]
 branch = true
-omit = [
-    "src/mcp_cli/chat/__main__.py",  # legacy dead code – imports non-existent module
-]
 
 [tool.coverage.report]
-fail_under = 60
 show_missing = true
+fail_under = 60
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

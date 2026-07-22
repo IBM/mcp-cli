@@ -1,0 +1,138 @@
+/* ── md: 768-1023px — tablets, narrow desktop ──────────────────── */
+@media (max-width: 1023px) {
+  /* Keep side-by-side layout but allow narrower panels */
+  .panel { min-width: 180px; min-height: var(--dash-panel-min-height); }
+  #settings-panel { width: 360px; }
+  #session-drawer { width: 340px; }
+}
+
+/* ── sm: 480-767px — large phones, narrow embeds ───────────────── */
+@media (max-width: 767px) {
+  #toolbar {
+    gap: 6px;
+    padding: 0 8px;
+    height: var(--dash-toolbar-height);
+    min-height: var(--dash-toolbar-height);
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  #toolbar .spacer { display: none; }
+  #model-group { display: none !important; }
+  #add-panel-btn { display: none; }
+  #export-dropdown { display: none; }
+  #overflow-btn { display: inline-flex; margin-left: auto; }
+
+  #settings-panel {
+    width: 100%; right: 0; left: 0; top: auto; bottom: 0;
+    max-height: 70vh;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
+  }
+  #session-drawer {
+    width: 100%; right: 0; left: 0; top: auto; bottom: 0;
+    max-height: 70vh;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
+  }
+  #approval-dialog { max-width: 95%; }
+  .toast { max-width: 90vw; }
+}
+
+/* ── xs: 0-479px — phones ──────────────────────────────────────── */
+@media (max-width: 479px) {
+  #toolbar .brand span:last-child { display: none; }
+  #sessions-btn { display: none; }
+  #new-session-btn { display: none; }
+  .tb-btn { font-size: 11px; padding: 4px 8px; }
+  .tb-select { max-width: 100px; font-size: 10px; }
+}
+
+/* ── Touch-friendly tap targets ─────────────────────────────────── */
+@media (pointer: coarse) {
+  .tb-btn {
+    min-height: var(--dash-touch-target);
+    min-width: 36px;
+    padding: 8px 12px;
+  }
+  .panel-btn {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+  .panel-header {
+    height: 36px;
+    min-height: 36px;
+  }
+  .dropdown-item {
+    min-height: var(--dash-touch-target);
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+  }
+  .session-actions button {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 6px 8px;
+  }
+  #approval-dialog .approval-btns button {
+    min-height: 48px;
+    padding: 12px 24px;
+    font-size: 14px;
+  }
+  .sidebar-section-btn {
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 13px;
+    padding: 4px 6px;
+  }
+  .sidebar-section-btns { opacity: 1; }
+  .sidebar-section-header {
+    height: 36px;
+    min-height: 36px;
+  }
+  .resize-handle-col, #sidebar-resize-handle {
+    width: 12px;
+    margin: 0 -4px;
+  }
+  .resize-handle-col::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px; height: 32px;
+    background: var(--dash-border);
+    border-radius: 2px;
+  }
+  .resize-handle-row {
+    height: 12px;
+    margin: -4px 0;
+  }
+  .resize-handle-row::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 32px; height: 4px;
+    background: var(--dash-border);
+    border-radius: 2px;
+  }
+  #sidebar-toggle {
+    padding: 16px 8px;
+    font-size: 16px;
+  }
+  #sidebar-close {
+    min-height: 36px;
+    min-width: 36px;
+    font-size: 18px;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

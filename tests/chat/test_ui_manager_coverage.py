@@ -4,6 +4,7 @@
 This file is separate from test_ui_manager.py (which tests the command completer).
 """
 
+import asyncio
 import signal
 import time
 import pytest
@@ -301,53 +302,185 @@ class TestToolExecution:
 class TestDoConfirmToolExecution:
     """Tests for do_confirm_tool_execution."""
 
-    def test_confirm_yes(self, ui_manager):
+    @pytest.mark.asyncio
+    async def test_confirm_yes(self, ui_manager):
         with (
             patch("mcp_cli.chat.ui_manager.output"),
             patch("builtins.input", return_value="y"),
         ):
-            result = ui_manager.do_confirm_tool_execution("fn", '{"x": 1}')
+            result = await ui_manager.do_confirm_tool_execution("fn", '{"x": 1}')
             assert result is True
 
-    def test_confirm_empty_default_yes(self, ui_manager):
+    @pytest.mark.asyncio
+    async def test_confirm_empty_default_yes(self, ui_manager):
         with (
             patch("mcp_cli.chat.ui_manager.output"),
             patch("builtins.input", return_value=""),
         ):
-            result = ui_manager.do_confirm_tool_execution("fn", {"x": 1})
+            result = await ui_manager.do_confirm_tool_execution("fn", {"x": 1})
             assert result is True
 
-    def test_confirm_no(self, ui_manager):
+    @pytest.mark.asyncio
+    async def test_confirm_no(self, ui_manager):
         with (
             patch("mcp_cli.chat.ui_manager.output"),
             patch("builtins.input", return_value="n"),
         ):
-            result = ui_manager.do_confirm_tool_execution("fn", {"x": 1})
+            result = await ui_manager.do_confirm_tool_execution("fn", {"x": 1})
             assert result is False
 
-    def test_confirm_invalid_json_string(self, ui_manager):
+    @pytest.mark.asyncio
+    async def test_confirm_invalid_json_string(self, ui_manager):
         with (
             patch("mcp_cli.chat.ui_manager.output"),
             patch("builtins.input", return_value="yes"),
         ):
-            result = ui_manager.do_confirm_tool_execution("fn", "{not json")
+            result = await ui_manager.do_confirm_tool_execution("fn", "{not json")
             assert result is True
 
-    def test_confirm_none_args(self, ui_manager):
+    @pytest.mark.asyncio
+    async def test_confirm_none_args(self, ui_manager):
         with (
             patch("mcp_cli.chat.ui_manager.output"),
             patch("builtins.input", return_value="y"),
         ):
-            result = ui_manager.do_confirm_tool_execution("fn", None)
+            result = await ui_manager.do_confirm_tool_execution("fn", None)
             assert result is True
 
-    def test_confirm_empty_string(self, ui_manager):
+    @pytest.mark.asyncio
+    async def test_confirm_empty_string(self, ui_manager):
         with (
             patch("mcp_cli.chat.ui_manager.output"),
             patch("builtins.input", return_value="y"),
         ):
-            result = ui_manager.do_confirm_tool_execution("fn", "")
+            result = await ui_manager.do_confirm_tool_execution("fn", "")
             assert result is True
+
+
+# ===========================================================================
+# Dashboard confirmation path tests
+# ===========================================================================
+
+
+class TestDoConfirmDashboardPath:
+    """Tests for do_confirm_tool_execution routing to dashboard bridge."""
+
+    @pytest.mark.asyncio
+    async def test_routes_to_dashboard_when_clients_connected(self, ui_manager):
+        """When dashboard bridge has clients, use bridge for approval."""
+        fut = asyncio.get_event_loop().create_future()
+        fut.set_result(True)
+
+        bridge = MagicMock()
+        bridge.has_clients = True
+        bridge.request_tool_approval = AsyncMock(return_value=fut)
+        ui_manager.context.dashboard_bridge = bridge
+
+        result = await ui_manager.do_confirm_tool_execution("test_tool", {"x": 1})
+        assert result is True
+        bridge.request_tool_approval.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_terminal_when_no_clients(self, ui_manager):
+        """When dashboard has no clients, fall back to terminal input."""
+        bridge = MagicMock()
+        bridge.has_clients = False
+        ui_manager.context.dashboard_bridge = bridge
+
+        with (
+            patch("mcp_cli.chat.ui_manager.output"),
+            patch("builtins.input", return_value="y"),
+        ):
+            result = await ui_manager.do_confirm_tool_execution("test_tool", {"x": 1})
+            assert result is True
+        bridge.request_tool_approval.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_terminal_when_no_bridge(self, ui_manager):
+        """When no dashboard bridge, fall back to terminal input."""
+        ui_manager.context.dashboard_bridge = None
+
+        with (
+            patch("mcp_cli.chat.ui_manager.output"),
+            patch("builtins.input", return_value="y"),
+        ):
+            result = await ui_manager.do_confirm_tool_execution("test_tool", {"x": 1})
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_dashboard_denial(self, ui_manager):
+        """Dashboard user denies the tool execution."""
+        fut = asyncio.get_event_loop().create_future()
+        fut.set_result(False)
+
+        bridge = MagicMock()
+        bridge.server = MagicMock()
+        bridge.server.has_clients = True
+        bridge.request_tool_approval = AsyncMock(return_value=fut)
+        ui_manager.context.dashboard_bridge = bridge
+
+        result = await ui_manager.do_confirm_tool_execution("test_tool", {"x": 1})
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_dashboard_timeout_returns_false(self, ui_manager):
+        """If dashboard approval times out, return False."""
+        # Create a future that never resolves
+        fut = asyncio.get_event_loop().create_future()
+
+        bridge = MagicMock()
+        bridge.server = MagicMock()
+        bridge.server.has_clients = True
+        bridge.request_tool_approval = AsyncMock(return_value=fut)
+        ui_manager.context.dashboard_bridge = bridge
+
+        # Patch timeout to be very short for testing
+        with patch(
+            "mcp_cli.chat.ui_manager.asyncio.wait_for", side_effect=asyncio.TimeoutError
+        ):
+            result = await ui_manager.do_confirm_tool_execution("test_tool", {"x": 1})
+            assert result is False
+        # Clean up
+        fut.cancel()
+
+    @pytest.mark.asyncio
+    async def test_dashboard_exception_falls_back_to_terminal(self, ui_manager):
+        """If dashboard approval throws, fall back to terminal."""
+        bridge = MagicMock()
+        bridge.server = MagicMock()
+        bridge.server.has_clients = True
+        bridge.request_tool_approval = AsyncMock(
+            side_effect=RuntimeError("connection lost")
+        )
+        ui_manager.context.dashboard_bridge = bridge
+
+        with (
+            patch("mcp_cli.chat.ui_manager.output"),
+            patch("builtins.input", return_value="y"),
+        ):
+            result = await ui_manager.do_confirm_tool_execution("test_tool", {"x": 1})
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_string_args_parsed_for_dashboard(self, ui_manager):
+        """String arguments should be JSON-parsed before sending to dashboard."""
+        fut = asyncio.get_event_loop().create_future()
+        fut.set_result(True)
+
+        bridge = MagicMock()
+        bridge.server = MagicMock()
+        bridge.server.has_clients = True
+        bridge.request_tool_approval = AsyncMock(return_value=fut)
+        ui_manager.context.dashboard_bridge = bridge
+
+        await ui_manager.do_confirm_tool_execution("test_tool", '{"key": "value"}')
+        call_args = bridge.request_tool_approval.call_args
+        # Arguments should have been parsed from JSON string to dict
+        assert (
+            call_args.kwargs.get("arguments") == {"key": "value"}
+            or call_args[1].get("arguments") == {"key": "value"}
+            or (len(call_args[0]) >= 2 and call_args[0][1] == {"key": "value"})
+        )
 
 
 # ===========================================================================

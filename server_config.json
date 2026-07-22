@@ -72,8 +72,7 @@
       "args": ["--directory", "/Users/christopherhay/chris-source/chuk-ai/mcp-servers/chuk-mcp-stac", "run", "chuk-mcp-stac", "stdio"]
     },
     "dem": {
-      "command": "uv",
-      "args": ["--directory", "/Users/christopherhay/chris-source/chuk-ai/mcp-servers/chuk-mcp-dem", "run", "chuk-mcp-dem", "stdio"]
+      "url": "https://dem.chukai.io/mcp"
     },
     "maritime": {
       "url": "https://maritime-archives.chukai.io/mcp"
@@ -84,8 +83,26 @@
     "her": {
        "url": "https://her.chukai.io/mcp"
     },
+    "chart": {
+       "url": "https://chart.chukai.io/mcp"
+    },
+    "map": {
+       "url": "https://map.chukai.io/mcp"
+    },
     "view_demo": {
        "url": "https://mcp-view-demo.fly.dev/mcp"
+    },
+    "pdf": {
+      "command": "uv",
+      "args": ["--directory", "/Users/christopherhay/chris-source/chuk-ai/mcp-servers/chuk-mcp-pdf", "run", "chuk-mcp-pdf", "stdio"]
+    },
+    "code-raptor": {                                                                                                                    
+        "command": "uv",                                                                                                                    
+        "args": [
+          "run",
+          "--directory", "/Users/christopherhay/chris-source/chuk-ai/mcp-servers/chuk-mcp-code-raptor",
+          "chuk-mcp-code-raptor", "stdio"
+        ]
     }
   }
 }

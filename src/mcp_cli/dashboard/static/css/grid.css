@@ -1,0 +1,141 @@
+/* ── Grid layout ────────────────────────────────────────────────── */
+#grid-wrapper {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
+}
+#grid-root {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#view-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+#view-overlay iframe {
+  position: absolute;
+  pointer-events: auto;
+  border: none;
+  display: none;
+}
+.grid-row {
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  min-height: 150px;
+}
+.grid-row + .grid-row { border-top: 1px solid var(--dash-border); }
+
+/* Panel */
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 200px;
+  position: relative;
+}
+.panel + .panel { border-left: 1px solid var(--dash-border); }
+.panel.minimized .panel-body { display: none; }
+.panel.minimized .panel-header { border-bottom: none; }
+
+/* Panel header */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  height: 28px;
+  min-height: 28px;
+  background: var(--dash-bg-surface);
+  border-bottom: 1px solid var(--dash-border);
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+  position: relative; /* for view-picker dropdown */
+}
+.panel-header:active { cursor: grabbing; }
+.panel-icon { font-size: 13px; flex-shrink: 0; }
+.panel-view-toggle {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--dash-fg);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--dash-font-ui);
+  cursor: pointer;
+  text-align: left;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-view-toggle:hover { color: var(--dash-accent); }
+.panel-view-menu {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  min-width: 180px;
+  z-index: 50;
+}
+.panel-btn {
+  background: transparent;
+  border: none;
+  color: var(--dash-fg-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+}
+.panel-btn:hover { background: var(--dash-bg-hover); color: var(--dash-fg); }
+
+/* Panel body (empty slot — iframes are positioned over it from #view-overlay) */
+.panel-body {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Panel placeholder */
+.panel-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--dash-fg-muted);
+  font-size: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+/* Resize handles */
+.resize-handle-col {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+.resize-handle-col:hover, .resize-handle-col.dragging { background: var(--dash-accent); }
+.resize-handle-row {
+  height: 4px;
+  cursor: row-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+.resize-handle-row:hover, .resize-handle-row.dragging { background: var(--dash-accent); }
+
+/* ── Focus styles ─────────────────────────────────────────────────── */
+.panel-btn:focus-visible,
+.panel-view-toggle:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }

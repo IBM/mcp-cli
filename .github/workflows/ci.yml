@@ -5,13 +5,17 @@ on:
       branches:
          - main
    pull_request:
+   workflow_call:
+
+permissions:
+   contents: read
 
 jobs:
    lint-and-typecheck:
       runs-on: ubuntu-latest
       steps:
          - name: Checkout code
-           uses: actions/checkout@v6
+           uses: actions/checkout@v7
 
          #      - name: Set up Python
          #        uses: actions/setup-python@v5
@@ -64,24 +68,28 @@ jobs:
       needs: lint-and-typecheck
       runs-on: ubuntu-latest
       strategy:
+         fail-fast: false
          matrix:
             test-path:
                - tests/adapters
+               - tests/apps
                - tests/auth
                - tests/chat
                - tests/cli
                - tests/commands
                - tests/config
+               - tests/context
+               - tests/core
+               - tests/display
                - tests/interactive
-               - tests/llm
+               - tests/memory
                - tests/model_management
                - tests/tools
-               - tests/ui
                - tests/utils
-               - tests/test_command_consistency.py
+               - tests/test_command_consistency.py tests/test_mcp_cli_init.py tests/test_mcp_cli_main_entry.py
       steps:
          - name: Checkout code
-           uses: actions/checkout@v6
+           uses: actions/checkout@v7
 
          #      - name: Set up Python
          #        uses: actions/setup-python@v5
@@ -97,13 +105,13 @@ jobs:
            run: uv sync --group dev
 
          - name: Run tests
-           run: uv run pytest --cov=src --cov-report= "${{ matrix.test-path }}"
+           run: uv run pytest --cov=src --cov-report= --cov-fail-under=0 ${{ matrix.test-path }}
 
          - name: Rename coverage file
            run: mv .coverage ".coverage.${{ strategy.job-index }}"
 
          - name: Upload coverage artifact
-           uses: actions/upload-artifact@v6
+           uses: actions/upload-artifact@v7
            with:
               name: coverage-${{ strategy.job-index }}
               path: .coverage.${{ strategy.job-index }}
@@ -115,7 +123,7 @@ jobs:
       runs-on: ubuntu-latest
       steps:
          - name: Checkout code
-           uses: actions/checkout@v6
+           uses: actions/checkout@v7
 
          #      - name: Set up Python
          #        uses: actions/setup-python@v5
@@ -133,7 +141,7 @@ jobs:
               uv pip install coverage[toml]
 
          - name: Download coverage reports
-           uses: actions/download-artifact@v7
+           uses: actions/download-artifact@v8
            with:
               pattern: coverage-*
               merge-multiple: true
@@ -146,5 +154,5 @@ jobs:
               echo "## Code Coverage Report" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
-              uv run coverage report -m >> $GITHUB_STEP_SUMMARY
+              uv run coverage report -m --fail-under=60 >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY

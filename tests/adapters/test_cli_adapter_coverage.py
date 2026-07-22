@@ -316,11 +316,14 @@ class TestRegisterCommand:
             new_callable=AsyncMock,
         ) as mock_exec:
             mock_exec.return_value = CommandResult(success=True, output="server list")
+
+            def _run_and_close(coro):
+                coro.close()
+                return CommandResult(success=True, output="server list")
+
             with patch(
                 "asyncio.run",
-                side_effect=lambda coro: CommandResult(
-                    success=True, output="server list"
-                ),
+                side_effect=_run_and_close,
             ):
                 with patch("mcp_cli.adapters.cli.output") as mock_output:
                     callback()
@@ -334,9 +337,11 @@ class TestRegisterCommand:
 
         callback = app.registered_commands[0].callback
 
-        with patch(
-            "asyncio.run", return_value=CommandResult(success=True, output=None)
-        ):
+        def _run(coro):
+            coro.close()
+            return CommandResult(success=True, output=None)
+
+        with patch("asyncio.run", side_effect=_run):
             with patch("mcp_cli.adapters.cli.output") as mock_output:
                 callback()
                 mock_output.print.assert_not_called()
@@ -349,10 +354,11 @@ class TestRegisterCommand:
 
         callback = app.registered_commands[0].callback
 
-        with patch(
-            "asyncio.run",
-            return_value=CommandResult(success=False, error="Something went wrong"),
-        ):
+        def _run(coro):
+            coro.close()
+            return CommandResult(success=False, error="Something went wrong")
+
+        with patch("asyncio.run", side_effect=_run):
             with patch("mcp_cli.adapters.cli.output") as mock_output:
                 with pytest.raises(typer.Exit) as exc_info:
                     callback()
@@ -367,9 +373,11 @@ class TestRegisterCommand:
 
         callback = app.registered_commands[0].callback
 
-        with patch(
-            "asyncio.run", return_value=CommandResult(success=False, error=None)
-        ):
+        def _run(coro):
+            coro.close()
+            return CommandResult(success=False, error=None)
+
+        with patch("asyncio.run", side_effect=_run):
             with patch("mcp_cli.adapters.cli.output") as mock_output:
                 with pytest.raises(typer.Exit) as exc_info:
                     callback()

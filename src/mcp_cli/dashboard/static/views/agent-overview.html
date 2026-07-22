@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Overview</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+:root {
+  --dash-bg: #1e1e2e; --dash-bg-surface: #262637; --dash-bg-hover: #2e2e42;
+  --dash-fg: #e0e0e0; --dash-fg-muted: #888899;
+  --dash-accent: #7aa2f7; --dash-success: #9ece6a; --dash-warning: #e0af68;
+  --dash-error: #f7768e; --dash-info: #7dcfff; --dash-border: #3b3b52;
+  --dash-font-mono: 'JetBrains Mono','Fira Code',monospace;
+  --dash-font-ui: 'Inter',-apple-system,sans-serif;
+  --dash-font-size: 13px; --dash-radius: 6px; --dash-spacing: 8px;
+}
+body {
+  background: var(--dash-bg);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-ui);
+  font-size: var(--dash-font-size);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#agent-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+#agent-grid::-webkit-scrollbar { width: 6px; }
+#agent-grid::-webkit-scrollbar-track { background: transparent; }
+#agent-grid::-webkit-scrollbar-thumb { background: var(--dash-border); border-radius: 3px; }
+
+.agent-card {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.agent-card:hover { background: var(--dash-bg-hover); border-color: var(--dash-accent); }
+.agent-card.focused { border-color: var(--dash-accent); }
+
+.agent-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.agent-status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.agent-status-dot.active    { background: var(--dash-success); }
+.agent-status-dot.paused    { background: var(--dash-warning); }
+.agent-status-dot.completed { background: var(--dash-fg-muted); }
+.agent-status-dot.failed    { background: var(--dash-error); }
+
+.agent-card-name {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-card-role {
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+}
+
+.agent-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--dash-fg-muted);
+}
+.agent-card-meta span {
+  background: var(--dash-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--dash-border);
+}
+
+.agent-card-action {
+  font-size: 11px;
+  color: var(--dash-info);
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--dash-fg-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* ── Responsive: narrow panel / small screen ──────────────────── */
+#agent-grid {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 400px) {
+  #agent-grid {
+    grid-template-columns: 1fr;
+    padding: 8px;
+    gap: 6px;
+  }
+  .agent-card { padding: 8px; }
+  .agent-card-name { font-size: 12px; }
+  .agent-card-role { font-size: 10px; }
+  .agent-card-meta { gap: 4px; font-size: 9px; }
+  .agent-card-meta span { padding: 1px 4px; }
+  .agent-card-action { font-size: 10px; }
+  .agent-card-header { gap: 6px; margin-bottom: 4px; }
+}
+
+@media (pointer: coarse) {
+  .agent-card { padding: 12px; min-height: 44px; }
+}
+</style>
+</head>
+<body>
+
+<div id="agent-grid">
+  <div id="empty-state">Waiting for agents...</div>
+</div>
+
+<script>
+'use strict';
+const PROTOCOL = 'mcp-dashboard';
+const VERSION  = 1;
+
+let agentList = [];
+let focusedAgentId = null;
+let agentStates = {}; // agent_id → last AGENT_STATE payload
+
+const gridEl = document.getElementById('agent-grid');
+const emptyEl = document.getElementById('empty-state');
+
+window.addEventListener('message', (evt) => {
+  const msg = evt.data;
+  if (!msg || msg.protocol !== PROTOCOL) return;
+
+  switch (msg.type) {
+    case 'INIT':
+      applyTheme(msg.payload.theme || {});
+      focusedAgentId = msg.payload.agent_id || null;
+      sendReady();
+      break;
+    case 'THEME':
+      applyTheme(msg.payload);
+      break;
+    case 'AGENT_LIST':
+      agentList = (msg.payload && msg.payload.agents) || [];
+      render();
+      break;
+    case 'AGENT_REGISTERED': {
+      const exists = agentList.find(a => a.agent_id === msg.payload.agent_id);
+      if (!exists) agentList.push(msg.payload);
+      render();
+      break;
+    }
+    case 'AGENT_UNREGISTERED':
+      agentList = agentList.filter(a => a.agent_id !== msg.payload.agent_id);
+      delete agentStates[msg.payload.agent_id];
+      render();
+      break;
+    case 'AGENT_STATUS': {
+      const agent = agentList.find(a => a.agent_id === msg.payload.agent_id);
+      if (agent) agent.status = msg.payload.status;
+      render();
+      break;
+    }
+    case 'AGENT_STATE':
+      if (msg.payload.agent_id) {
+        agentStates[msg.payload.agent_id] = msg.payload;
+      }
+      render();
+      break;
+  }
+});
+
+function getShell() {
+  if (window.parent !== window) return window.parent;
+  if (window.opener) return window.opener;
+  return null;
+}
+
+function sendReady() {
+  const shell = getShell();
+  if (!shell) return;
+  shell.postMessage({
+    protocol: PROTOCOL, version: VERSION,
+    type: 'READY',
+    payload: { name: 'Agent Overview', icon: 'agents', accepts: ['AGENT_LIST', 'AGENT_REGISTERED', 'AGENT_UNREGISTERED', 'AGENT_STATUS', 'AGENT_STATE'], version: 1 }
+  }, '*');
+}
+
+function applyTheme(t) {
+  const r = document.documentElement;
+  const set = (k, v) => v && r.style.setProperty(k, v);
+  set('--dash-bg', t.bg); set('--dash-bg-surface', t.bg_surface);
+  set('--dash-bg-hover', t.bg_hover); set('--dash-fg', t.fg);
+  set('--dash-fg-muted', t.fg_muted); set('--dash-accent', t.accent);
+  set('--dash-success', t.success); set('--dash-warning', t.warning);
+  set('--dash-error', t.error); set('--dash-info', t.info);
+  set('--dash-border', t.border); set('--dash-font-mono', t.font_mono);
+  set('--dash-font-ui', t.font_ui); set('--dash-font-size', t.font_size);
+  set('--dash-radius', t.radius); set('--dash-spacing', t.spacing);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function render() {
+  gridEl.innerHTML = '';
+
+  if (agentList.length === 0) {
+    gridEl.appendChild(emptyEl);
+    emptyEl.textContent = 'Waiting for agents...';
+    return;
+  }
+
+  if (agentList.length === 1) {
+    const single = document.createElement('div');
+    single.id = 'empty-state';
+    single.textContent = 'Single agent mode';
+    gridEl.appendChild(single);
+  }
+
+  for (const agent of agentList) {
+    const card = document.createElement('div');
+    card.className = 'agent-card' + (agent.agent_id === focusedAgentId ? ' focused' : '');
+
+    const status = agent.status || 'active';
+    const state = agentStates[agent.agent_id];
+
+    // Header
+    let headerHtml = `
+      <div class="agent-card-header">
+        <span class="agent-status-dot ${esc(status)}"></span>
+        <span class="agent-card-name">${esc(agent.name || agent.agent_id)}</span>
+      </div>`;
+
+    if (agent.role) {
+      headerHtml += `<div class="agent-card-role">${esc(agent.role)}</div>`;
+    }
+
+    // Meta pills
+    let metaHtml = '<div class="agent-card-meta">';
+    if (agent.model)    metaHtml += `<span>${esc(agent.model)}</span>`;
+    if (agent.provider) metaHtml += `<span>${esc(agent.provider)}</span>`;
+    if (agent.message_count) metaHtml += `<span>${agent.message_count} msgs</span>`;
+    if (agent.tool_count)    metaHtml += `<span>${agent.tool_count} tools</span>`;
+    metaHtml += `<span>${esc(status)}</span>`;
+    metaHtml += '</div>';
+
+    // Current action from AGENT_STATE
+    let actionHtml = '';
+    if (state) {
+      const s = state.status || 'idle';
+      const tool = state.current_tool ? ` → ${esc(state.current_tool)}` : '';
+      actionHtml = `<div class="agent-card-action">${esc(s)}${tool}</div>`;
+    }
+
+    card.innerHTML = headerHtml + metaHtml + actionHtml;
+
+    card.addEventListener('click', () => {
+      focusedAgentId = agent.agent_id;
+      const shell = getShell();
+      if (shell) {
+        shell.postMessage({
+          protocol: PROTOCOL, version: VERSION,
+          type: 'USER_ACTION',
+          payload: { action: 'focus_agent', agent_id: agent.agent_id }
+        }, '*');
+      }
+      render();
+    });
+
+    gridEl.appendChild(card);
+  }
+}
+
+sendReady();
+</script>
+</body>
+</html>

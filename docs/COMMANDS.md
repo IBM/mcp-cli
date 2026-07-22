@@ -298,6 +298,78 @@ See [TOKEN_MANAGEMENT.md](./TOKEN_MANAGEMENT.md) for comprehensive token documen
 /cls                               # Clear screen only
 ```
 
+### Virtual Memory (Experimental)
+
+Inspect the AI virtual memory subsystem during conversations (requires `--vm` flag):
+
+```bash
+/memory                            # Summary dashboard: mode, turn, pages, utilization, metrics
+/vm                                # Alias for /memory
+/mem                               # Alias for /memory
+/memory pages                      # Table of all memory pages (ID, type, tier, tokens, pinned)
+/memory page <id>                  # Detailed view of a specific page with content preview
+/memory stats                      # Full debug dump of all VM subsystem stats (JSON)
+```
+
+The dashboard shows:
+- **Working set utilization**: L0/L1 page counts, tokens used/available, visual utilization bar
+- **Page table**: Total pages, dirty pages, distribution by storage tier (L0-L4)
+- **Metrics**: Page faults, evictions, TLB hit rate
+- **Configuration**: VM mode, current turn, token budget
+
+Without `--vm`, the command shows: "VM not enabled. Start with --vm flag."
+
+**VM CLI Flags:**
+```bash
+# Enable VM with defaults (passive mode, 128K budget)
+mcp-cli --server sqlite --vm
+
+# Set a tight budget to force eviction pressure
+mcp-cli --server sqlite --vm --vm-budget 500
+
+# Use relaxed mode (VM-aware but conversational)
+mcp-cli --server sqlite --vm --vm-mode relaxed
+```
+
+### Model-Driven Planning
+
+Enable the LLM to autonomously create and execute multi-step plans during conversation:
+
+```bash
+# Enable plan tools — the model decides WHEN to plan
+mcp-cli --server sqlite --plan-tools
+
+# Or with the chat subcommand
+mcp-cli chat --server sqlite --plan-tools
+```
+
+When enabled, three internal tools are added to the LLM's tool list:
+- `plan_create_and_execute` — generate and execute a plan in one call (most common)
+- `plan_create` — generate a plan without executing it
+- `plan_execute` — execute a previously created plan by ID
+
+The model calls these when it determines a task requires multi-step coordination (e.g., "read a file, find importers, run tests"). For simple tasks, it calls tools directly.
+
+See [PLANNING.md](./PLANNING.md) for full documentation.
+
+### Direct LLM Chat (No Tools)
+
+Skip MCP server connections entirely and chat directly with the LLM:
+
+```bash
+# No tool calling — MCP servers are not connected
+mcp-cli --no-tools
+mcp-cli --no-tools --provider openai --model gpt-4o
+mcp-cli chat --no-tools --provider anthropic --model claude-sonnet-4-6
+```
+
+When `--no-tools` is set:
+- No MCP servers are initialized (no network connections attempted)
+- The LLM receives no tool definitions
+- The model responds conversationally only
+
+This is useful when you want a fast, lightweight chat session without the overhead of server connections, or when using a model that handles tools poorly.
+
 ### Token Usage
 
 Track API token consumption across your conversation:
@@ -322,6 +394,50 @@ Save and restore conversation sessions:
 ```
 
 Sessions are stored as JSON in `~/.mcp-cli/sessions/`. Auto-save triggers every 10 turns by default.
+
+### Multi-Modal Attachments
+
+Stage files to include in your next message. Supports images, text/code files, and audio.
+
+**Stage Files:**
+```bash
+/attach photo.png                  # Stage an image
+/attach code.py                    # Stage a text/code file
+/attach clip.mp3                   # Stage an audio file
+/file data.csv                     # Alias for /attach
+/image screenshot.heic             # Alias for /attach
+```
+
+**Manage Staging:**
+```bash
+/attach list                       # Show currently staged files
+/attach clear                      # Clear all staged files
+```
+
+**Inline References (in any message):**
+```bash
+@file:screenshot.png describe what you see in this image
+@file:report.txt @file:data.csv compare these two files
+```
+
+Image URLs in messages are automatically detected and sent as vision content.
+
+**Supported File Types:**
+- **Images:** `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`
+- **Audio:** `.mp3`, `.wav`
+- **Text/Code:** `.txt`, `.md`, `.csv`, `.json`, `.html`, `.xml`, `.yaml`, `.yml`, `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.sh`, `.bash`, `.rs`, `.go`, `.java`, `.c`, `.cpp`, `.h`, `.hpp`, `.rb`, `.swift`, `.kt`, `.sql`, `.toml`, `.ini`, `.cfg`, `.env`, `.log`
+
+**Size Limits:**
+- Maximum file size: 20 MB per file
+- Maximum attachments per message: 10
+
+**CLI Flag:**
+```bash
+# Attach files to the first message (repeatable)
+mcp-cli --server sqlite --attach image.png --attach data.csv
+```
+
+See [ATTACHMENTS.md](./ATTACHMENTS.md) for comprehensive attachments documentation.
 
 ### Conversation Export
 
@@ -588,6 +704,7 @@ Available Commands:
   exit         - Exit the application
   export ▸     - Export conversation (markdown/json)
   help         - Show help information
+  memory ▸     - View AI virtual memory state (aliases: /vm, /mem)
   model ▸      - Show current model or switch models
   models       - List all available models
   provider ▸   - Show current provider or switch providers

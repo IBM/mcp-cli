@@ -29,6 +29,8 @@ from chuk_ai_session_manager.procedural_memory import (
     ProceduralContextFormatter,
     FormatterConfig,
 )
+from chuk_ai_session_manager.memory.models import VMMode
+from chuk_ai_session_manager.memory.working_set import WorkingSetConfig
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,12 @@ class ChatContext:
         infinite_context: bool = False,
         token_threshold: int = 4000,
         max_turns_per_segment: int = 20,
+        enable_vm: bool = False,
+        vm_mode: str = "passive",
+        vm_budget: int = 128_000,
+        health_interval: int = 0,
+        enable_plan_tools: bool = False,
+        agent_id: str = "default",
     ):
         """
         Create chat context with required managers.
@@ -68,16 +76,27 @@ class ChatContext:
             infinite_context: Enable infinite context mode in SessionManager
             token_threshold: Token threshold for infinite context segmentation
             max_turns_per_segment: Max turns per segment before context packing
+            enable_vm: Enable AI Virtual Memory subsystem (experimental)
+            vm_mode: VM mode - strict, relaxed, or passive
+            vm_budget: Max tokens for VM L0 working set (context window budget)
+            health_interval: Background health check interval in seconds (0 = disabled)
+            enable_plan_tools: Enable plan_create/plan_execute as LLM-callable tools
         """
         self.tool_manager = tool_manager
         self.model_manager = model_manager
         self.session_id = session_id or self._generate_session_id()
+        self.agent_id = agent_id
 
         # Context management
         self._max_history_messages = max_history_messages
         self._infinite_context = infinite_context
         self._token_threshold = token_threshold
         self._max_turns_per_segment = max_turns_per_segment
+        self._enable_vm = enable_vm
+        self._vm_mode = vm_mode
+        self._vm_budget = vm_budget
+        self._health_interval = health_interval
+        self._enable_plan_tools = enable_plan_tools
 
         # Core session manager - always required
         self.session: SessionManager = SessionManager(session_id=self.session_id)
@@ -101,15 +120,29 @@ class ChatContext:
         self._pending_context_notices: list[str] = []
         self._system_prompt_dirty: bool = True
 
+        # Persistent memory scopes (workspace + global)
+        self.memory_store: Any = None
+
         # Token usage tracking
         self.token_tracker = TokenTracker()
 
         # Session persistence
-        self._session_store = SessionStore()
+        self._session_store = SessionStore(agent_id=self.agent_id)
         self._auto_save_counter = 0
 
         # ToolProcessor back-reference (set by ToolProcessor.__init__)
         self.tool_processor: Any = None
+
+        # Dashboard bridge (set by chat_handler when --dashboard is active, else None)
+        self.dashboard_bridge: Any = None
+
+        # Agent manager (set by chat_handler when multi-agent enabled, else None)
+        self.agent_manager: Any = None
+
+        # Attachment staging for multi-modal input (/attach command)
+        from mcp_cli.chat.attachments import AttachmentStaging
+
+        self.attachment_staging = AttachmentStaging()
 
         # Tool state (filled during initialization)
         self.tools: list[ToolInfo] = []
@@ -119,6 +152,7 @@ class ChatContext:
         self.openai_tools: list[dict[str, Any]] = []
         self.tool_name_mapping: dict[str, str] = {}
         self._tool_index: dict[str, ToolInfo] = {}
+        self.no_tools: bool = False
 
         logger.debug(f"ChatContext created with {self.provider}/{self.model}")
 
@@ -141,6 +175,12 @@ class ChatContext:
         infinite_context: bool = False,
         token_threshold: int = 4000,
         max_turns_per_segment: int = 20,
+        enable_vm: bool = False,
+        vm_mode: str = "passive",
+        vm_budget: int = 128_000,
+        health_interval: int = 0,
+        enable_plan_tools: bool = False,
+        agent_id: str = "default",
     ) -> "ChatContext":
         """
         Factory method for convenient creation.
@@ -157,6 +197,11 @@ class ChatContext:
             infinite_context: Enable infinite context mode in SessionManager
             token_threshold: Token threshold for infinite context segmentation
             max_turns_per_segment: Max turns per segment before context packing
+            enable_vm: Enable AI Virtual Memory subsystem (experimental)
+            vm_mode: VM mode - strict, relaxed, or passive
+            vm_budget: Max tokens for VM L0 working set (context window budget)
+            health_interval: Background health check interval in seconds (0 = disabled)
+            enable_plan_tools: Enable plan_create/plan_execute as LLM-callable tools
 
         Returns:
             Configured ChatContext instance
@@ -185,6 +230,12 @@ class ChatContext:
             infinite_context=infinite_context,
             token_threshold=token_threshold,
             max_turns_per_segment=max_turns_per_segment,
+            enable_vm=enable_vm,
+            vm_mode=vm_mode,
+            vm_budget=vm_budget,
+            health_interval=health_interval,
+            enable_plan_tools=enable_plan_tools,
+            agent_id=agent_id,
         )
 
     # ── Properties ────────────────────────────────────────────────────────
@@ -213,13 +264,29 @@ class ChatContext:
 
         System prompt is always included. If max_history_messages > 0,
         only the most recent N event-based messages are returned (sliding window).
+
+        When VM is enabled:
+        - System prompt is replaced with VM-packed developer_message
+          (manifest, working set summaries, VM rules).
+        - Only recent turn groups that fit within the VM token budget
+          are sent as raw events. Older turns are represented by VM pages
+          in the developer_message, avoiding double-counting.
         """
         messages = []
 
+        # Determine system prompt content — VM replaces it with packed context
+        if self.session.vm:
+            vm_ctx = self.session.get_vm_context()
+            system_content = (
+                vm_ctx["developer_message"] if vm_ctx else self._system_prompt
+            )
+        else:
+            system_content = self._system_prompt
+
         # System prompt always included (outside the window)
-        if self._system_prompt:
+        if system_content:
             messages.append(
-                HistoryMessage(role=MessageRole.SYSTEM, content=self._system_prompt)
+                HistoryMessage(role=MessageRole.SYSTEM, content=system_content)
             )
 
         # Build event-based messages
@@ -244,8 +311,12 @@ class ChatContext:
                     if isinstance(event.message, dict):
                         event_messages.append(HistoryMessage.from_dict(event.message))
 
-        # Apply sliding window if configured
-        if (
+        # VM-aware context filtering: fit raw events within token budget
+        if self.session.vm and system_content:
+            event_messages = self._vm_filter_events(event_messages, system_content)
+
+        # Apply sliding window if configured (non-VM fallback)
+        elif (
             self._max_history_messages > 0
             and len(event_messages) > self._max_history_messages
         ):
@@ -262,6 +333,117 @@ class ChatContext:
 
         messages.extend(event_messages)
         return messages
+
+    # ── VM context filtering ─────────────────────────────────────────────
+
+    # Minimum recent turns always included regardless of VM budget.
+    # Ensures the model can always see immediate conversation context.
+    _VM_MIN_RECENT_TURNS = 3
+
+    def _vm_filter_events(
+        self,
+        events: list[HistoryMessage],
+        system_content: str,
+    ) -> list[HistoryMessage]:
+        """Filter events to fit within VM token budget.
+
+        Groups events into logical turns (starting at each user message),
+        estimates token cost per group, and includes turn groups from newest
+        to oldest until the budget is exhausted. Tool-call pairs are kept
+        intact within their turn group.
+
+        The most recent ``_VM_MIN_RECENT_TURNS`` turns are always included
+        regardless of budget, so the model always has immediate context.
+        Older turns beyond those are included only if budget allows.
+
+        Evicted turns are NOT lost — they're represented by VM pages in the
+        developer_message (manifest + working set summaries).
+
+        Args:
+            events: All event-based messages from the session.
+            system_content: The VM developer_message (not counted against budget).
+
+        Returns:
+            Filtered event list that fits within the VM budget.
+        """
+        from mcp_cli.config.defaults import DEFAULT_CHARS_PER_TOKEN_ESTIMATE
+
+        if not events:
+            return events
+
+        cpt = DEFAULT_CHARS_PER_TOKEN_ESTIMATE
+
+        # Budget is for conversation events only — system prompt is on top
+        remaining = self._vm_budget
+
+        # Group events into logical turns.
+        # A new turn starts at each user message.
+        turns: list[list[HistoryMessage]] = []
+        current_turn: list[HistoryMessage] = []
+
+        for msg in events:
+            if msg.role == MessageRole.USER and current_turn:
+                turns.append(current_turn)
+                current_turn = []
+            current_turn.append(msg)
+        if current_turn:
+            turns.append(current_turn)
+
+        # Nothing to filter
+        if len(turns) <= self._VM_MIN_RECENT_TURNS:
+            return events
+
+        # Estimate token cost per turn group
+        def _estimate_turn_tokens(turn: list[HistoryMessage]) -> int:
+            total_chars = 0
+            for msg in turn:
+                total_chars += len(msg.content or "")
+                if msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        total_chars += len(str(tc))
+            return max(total_chars // cpt, 1)
+
+        # Always include the most recent N turns (guaranteed minimum)
+        guaranteed = turns[-self._VM_MIN_RECENT_TURNS :]
+        older = turns[: -self._VM_MIN_RECENT_TURNS]
+
+        # Deduct guaranteed turns from budget
+        for turn in guaranteed:
+            remaining -= _estimate_turn_tokens(turn)
+
+        # Include older turns from newest to oldest while budget allows
+        budget_included: list[list[HistoryMessage]] = []
+        for turn in reversed(older):
+            cost = _estimate_turn_tokens(turn)
+            if remaining >= cost:
+                budget_included.append(turn)
+                remaining -= cost
+            else:
+                break
+
+        # Restore chronological order
+        budget_included.reverse()
+
+        evicted_turns = len(older) - len(budget_included)
+        if evicted_turns > 0:
+            evicted_msgs = sum(len(t) for t in older[:evicted_turns])
+            logger.info(
+                f"VM context filter: keeping {len(budget_included) + len(guaranteed)}"
+                f"/{len(turns)} turns "
+                f"({evicted_msgs} messages evicted, budget={self._vm_budget} tokens)"
+            )
+            self.add_context_notice(
+                f"{evicted_turns} older conversation turns were moved to virtual memory. "
+                "Their content is available via the VM manifest in the system context."
+            )
+
+        # Flatten: budget-included older turns + guaranteed recent turns
+        result: list[HistoryMessage] = []
+        for turn in budget_included:
+            result.extend(turn)
+        for turn in guaranteed:
+            result.extend(turn)
+        return result
 
     # ── Initialization ────────────────────────────────────────────────────
     async def initialize(
@@ -300,17 +482,40 @@ class ChatContext:
 
     async def _initialize_session(self) -> None:
         """Initialize the session with system prompt and context management."""
+        vm_config = (
+            WorkingSetConfig(
+                max_l0_tokens=self._vm_budget,
+                reserved_tokens=min(4000, self._vm_budget // 4),
+            )
+            if self._enable_vm
+            else None
+        )
         self.session = SessionManager(
             session_id=self.session_id,
             system_prompt=self._system_prompt,
             infinite_context=self._infinite_context,
             token_threshold=self._token_threshold,
             max_turns_per_segment=self._max_turns_per_segment,
+            enable_vm=self._enable_vm,
+            vm_mode=VMMode(self._vm_mode),
+            vm_config=vm_config,
         )
         await self.session._ensure_initialized()
+
+        # Initialize persistent memory scopes
+        try:
+            from mcp_cli.memory.store import MemoryScopeStore
+
+            self.memory_store = MemoryScopeStore()
+            logger.debug("Persistent memory store initialized")
+        except Exception as exc:
+            logger.warning("Could not initialize memory store: %s", exc)
+            self.memory_store = None
+
         logger.debug(
             f"Session initialized: {self.session_id} "
-            f"(infinite_context={self._infinite_context})"
+            f"(infinite_context={self._infinite_context}, "
+            f"vm={self._enable_vm}, vm_budget={self._vm_budget})"
         )
 
     def _generate_system_prompt(self) -> None:
@@ -326,6 +531,13 @@ class ChatContext:
             tools=tools_for_prompt,
             server_tool_groups=server_tool_groups,
         )
+
+        # Append persistent memory context
+        if self.memory_store:
+            memory_section = self.memory_store.format_for_system_prompt()
+            if memory_section:
+                self._system_prompt += "\n\n" + memory_section
+
         self._system_prompt_dirty = False
 
     def _build_server_tool_groups(self) -> list[ServerToolGroup]:
@@ -447,10 +659,28 @@ class ChatContext:
         return await self.tool_manager.get_server_for_tool(tool_name) or "Unknown"
 
     # ── Conversation management ───────────────────────────────────────────
-    async def add_user_message(self, content: str) -> None:
-        """Add user message to conversation."""
-        await self.session.user_says(content)
-        logger.debug(f"User message added: {content[:50]}...")
+    async def add_user_message(self, content: str | list[dict[str, Any]]) -> None:
+        """Add user message to conversation.
+
+        Accepts plain text (str) or multi-modal content blocks (list[dict]).
+        Multi-modal content is injected as a raw event since
+        SessionManager.user_says() only accepts strings.
+        """
+        if isinstance(content, str):
+            await self.session.user_says(content)
+            logger.debug(f"User message added: {content[:50]}...")
+        else:
+            # Multi-modal: inject as dict event (same pattern as inject_tool_message)
+            msg = HistoryMessage(role=MessageRole.USER, content=content)
+            event = SessionEvent(
+                message=msg.to_dict(),
+                source=EventSource.USER,
+                type=EventType.TOOL_CALL,
+            )
+            self.session._session.events.append(event)
+            logger.debug(
+                f"Multi-modal user message added: {len(content)} content blocks"
+            )
 
     async def add_assistant_message(self, content: str) -> None:
         """Add assistant message to conversation."""
@@ -625,9 +855,7 @@ class ChatContext:
         """
         try:
             messages = self.conversation_history
-            message_dicts = [
-                m.to_dict() if hasattr(m, "to_dict") else m for m in messages
-            ]
+            message_dicts: list[dict[str, Any]] = [m.to_dict() for m in messages]
 
             token_usage = None
             if self.token_tracker.turn_count > 0:
@@ -641,6 +869,7 @@ class ChatContext:
             data = SessionData(
                 metadata=SessionMetadata(
                     session_id=self.session_id,
+                    agent_id=self.agent_id,
                     provider=self.provider,
                     model=self.model,
                     message_count=len(message_dicts),
@@ -678,27 +907,35 @@ class ChatContext:
                     continue  # System prompt is regenerated
                 elif role == MessageRole.USER:
                     event = SessionEvent(
-                        event_type=EventType.USER_MESSAGE,
+                        type=EventType.MESSAGE,
                         source=EventSource.USER,
-                        content=content,
+                        message=content,
                     )
                 elif role == MessageRole.ASSISTANT:
-                    event = SessionEvent(
-                        event_type=EventType.ASSISTANT_MESSAGE,
-                        source=EventSource.ASSISTANT,
-                        content=content,
-                    )
+                    # Assistant messages with tool_calls need full dict
+                    if msg_dict.get("tool_calls"):
+                        event = SessionEvent(
+                            type=EventType.TOOL_CALL,
+                            source=EventSource.SYSTEM,
+                            message=msg_dict,
+                        )
+                    else:
+                        event = SessionEvent(
+                            type=EventType.MESSAGE,
+                            source=EventSource.LLM,
+                            message=content,
+                        )
                 elif role == MessageRole.TOOL:
+                    # Tool result messages stored as full dict for reconstruction
                     event = SessionEvent(
-                        event_type=EventType.TOOL_RESULT,
-                        source=EventSource.TOOL,
-                        content=content,
-                        metadata={"tool_call_id": msg_dict.get("tool_call_id", "")},
+                        type=EventType.TOOL_CALL,
+                        source=EventSource.SYSTEM,
+                        message=msg_dict,
                     )
                 else:
                     continue
 
-                self.session.add_event(event)
+                self.session._session.events.append(event)
 
             logger.info(
                 f"Loaded session {session_id} with {len(data.messages)} messages"
@@ -752,6 +989,7 @@ class ChatContext:
             "tool_to_server_map": self.tool_to_server_map,
             "tool_manager": self.tool_manager,
             "session_id": self.session_id,
+            "agent_id": self.agent_id,
         }
 
     def update_from_dict(self, context_dict: dict[str, Any]) -> None:

@@ -42,6 +42,9 @@ DEFAULT_HTTP_CONNECT_TIMEOUT = 10.0
 DISCOVERY_TIMEOUT = 10.0
 """Provider discovery HTTP timeout."""
 
+DEFAULT_PROVIDER_DISCOVERY_TIMEOUT = 5.0
+"""Timeout for provider/model discovery HTTP requests and subprocess calls."""
+
 REFRESH_TIMEOUT = 1.0
 """Display refresh timeout."""
 
@@ -98,6 +101,20 @@ DEFAULT_MAX_STREAMING_BUFFER_CHARS = 1_048_576
 
 DEFAULT_MAX_STREAMING_CHUNKS = 50_000
 """Max streaming chunks before stall detection. 0 = unlimited."""
+
+
+# ================================================================
+# Virtual Memory Defaults (Experimental)
+# ================================================================
+
+DEFAULT_ENABLE_VM = False
+"""Enable AI Virtual Memory subsystem (experimental)."""
+
+DEFAULT_VM_MODE = "passive"
+"""VM mode: strict, relaxed, or passive. Passive is safest for initial testing."""
+
+DEFAULT_VM_BUDGET = 128_000
+"""Token budget for conversation events in VM mode (on top of system prompt). Lower values force earlier eviction."""
 
 
 # ================================================================
@@ -188,6 +205,15 @@ DEFAULT_TOKEN_BACKEND = "auto"
 # ================================================================
 # Path Defaults
 # ================================================================
+
+DEFAULT_CONFIG_DIR = "~/.mcp-cli"
+"""Default root config directory for mcp-cli."""
+
+DEFAULT_SESSIONS_DIR = "~/.mcp-cli/sessions"
+"""Default directory for saved conversation sessions."""
+
+DEFAULT_DOWNLOADS_DIR = "~/.mcp-cli/downloads"
+"""Default directory for downloaded files (e.g., VM page exports)."""
 
 DEFAULT_CONFIG_FILENAME = "server_config.json"
 """Default configuration filename."""
@@ -304,6 +330,77 @@ DEFAULT_APP_INIT_TIMEOUT = 30
 
 
 # ================================================================
+# Agent Identity Defaults
+# ================================================================
+
+DEFAULT_AGENT_ID = "default"
+"""Default agent identifier for multi-agent support."""
+
+
+# ================================================================
+# Dashboard Defaults
+# ================================================================
+
+DEFAULT_DASHBOARD_PORT_START = 9120
+"""Starting port for the dashboard HTTP+WebSocket server."""
+
+DEFAULT_DASHBOARD_AUTO_OPEN_BROWSER = True
+"""Automatically open browser when dashboard is launched."""
+
+DEFAULT_DASHBOARD_RECONNECT_INTERVAL = 5.0
+"""Seconds between WebSocket reconnect attempts."""
+
+DEFAULT_DASHBOARD_LAYOUTS_FILE = "~/.config/mcp-cli/dashboard-layouts.json"
+"""Path to user-saved dashboard layout configurations."""
+
+
+# ================================================================
+# Memory Scope Defaults (Tier 8)
+# ================================================================
+
+DEFAULT_MEMORY_BASE_DIR = "~/.mcp-cli/memory"
+"""Default directory for persistent memory storage."""
+
+DEFAULT_MEMORY_MAX_ENTRIES_PER_SCOPE = 100
+"""Maximum number of memory entries per scope before oldest is evicted."""
+
+DEFAULT_MEMORY_MAX_PROMPT_CHARS = 2000
+"""Maximum characters for memory section in system prompt."""
+
+
+# ================================================================
+# Planning Defaults (Tier 6)
+# ================================================================
+
+DEFAULT_PLANS_DIR = "~/.mcp-cli/plans"
+"""Default directory for plan persistence."""
+
+DEFAULT_ENABLE_PLAN_TOOLS = False
+"""Enable plan_create / plan_execute / plan_create_and_execute as LLM-callable tools."""
+
+DEFAULT_PLAN_MAX_CONCURRENCY = 4
+"""Maximum concurrent steps within a parallel batch."""
+
+DEFAULT_PLAN_MAX_REPLANS = 2
+"""Maximum number of re-plan attempts on step failure."""
+
+DEFAULT_PLAN_MAX_STEP_RETRIES = 2
+"""Maximum LLM retry attempts per plan step on tool failure."""
+
+DEFAULT_PLAN_VARIABLE_SUMMARY_MAX_CHARS = 500
+"""Maximum characters per variable in LLM variable summary."""
+
+DEFAULT_PLAN_CHECKPOINT_MAX_CHARS = 1000
+"""Maximum characters per variable in checkpoint serialization."""
+
+DEFAULT_PLAN_ERROR_MESSAGE_MAX_CHARS = 200
+"""Maximum characters for error messages in plan execution results."""
+
+DEFAULT_PLAN_DAG_TITLE_MAX_CHARS = 35
+"""Maximum characters for step titles in DAG visualization."""
+
+
+# ================================================================
 # Logging Defaults
 # ================================================================
 
@@ -315,3 +412,23 @@ DEFAULT_LOG_MAX_BYTES = 10_485_760
 
 DEFAULT_LOG_BACKUP_COUNT = 3
 """Number of rotated log files to keep."""
+
+
+# ================================================================
+# Attachment Defaults
+# ================================================================
+
+DEFAULT_MAX_ATTACHMENT_SIZE_BYTES = 20_971_520
+"""Maximum attachment file size (20 MB). Base64 encoding adds ~33%."""
+
+DEFAULT_MAX_ATTACHMENTS_PER_MESSAGE = 10
+"""Maximum attachments per user message (staged + inline combined)."""
+
+DEFAULT_IMAGE_DETAIL_LEVEL = "auto"
+"""Default detail level for image_url content blocks (auto, low, high)."""
+
+DEFAULT_DASHBOARD_INLINE_IMAGE_THRESHOLD = 102_400
+"""Max base64 size (bytes) for inline image previews in dashboard (100 KB)."""
+
+DEFAULT_DASHBOARD_TEXT_PREVIEW_CHARS = 2000
+"""Max chars of text file content to send as preview in dashboard."""

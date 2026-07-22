@@ -25,18 +25,24 @@ HOST_PAGE_TEMPLATE = r"""<!DOCTYPE html>
       --status-err: #e74c3c;
     }}
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-    body {{ background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; }}
+    html, body {{ height: 100%; }}
+    body {{
+      background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex; flex-direction: column;
+    }}
     #header {{
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 16px; background: var(--header-bg);
       border-bottom: 1px solid var(--accent); font-size: 14px;
+      flex-shrink: 0;
     }}
     #header .title {{ font-weight: 600; }}
     #header .status {{ font-size: 12px; opacity: 0.7; }}
     #header .status.connected {{ color: var(--status-ok); opacity: 1; }}
     #header .status.error {{ color: var(--status-err); opacity: 1; }}
     #app-container {{
-      width: 100%; height: calc(100vh - 40px); overflow: hidden;
+      width: 100%; flex: 1; overflow: hidden; min-height: 0;
     }}
     #app-iframe {{
       width: 100%; height: 100%; border: none; background: #fff;
@@ -220,10 +226,8 @@ HOST_PAGE_TEMPLATE = r"""<!DOCTYPE html>
         var mode = msg.params.mode || "inline";
         if (mode === "fullscreen") {{
           document.getElementById("header").style.display = "none";
-          document.getElementById("app-container").style.height = "100vh";
         }} else {{
           document.getElementById("header").style.display = "flex";
-          document.getElementById("app-container").style.height = "calc(100vh - 40px)";
         }}
         postToApp({{ jsonrpc: "2.0", id: msg.id, result: {{ mode: mode }} }});
         // Notify app of context change per MCP spec
@@ -287,6 +291,29 @@ HOST_PAGE_TEMPLATE = r"""<!DOCTYPE html>
         setStatus("App initialization timed out", "error");
       }}
     }}, INIT_TIMEOUT);
+  }}
+
+  // ---- Embedded mode (hide host header when inside dashboard panel) ----
+  var isEmbedded = new URLSearchParams(window.location.search).has("embedded");
+  if (isEmbedded) {{
+    document.getElementById("header").style.display = "none";
+    document.body.style.background = "transparent";
+
+    // When embedded in a dashboard, the outer iframe starts display:none
+    // (0×0 viewport).  Canvas-based apps (Chart.js, maps) that initialise
+    // at 0×0 never recover because their ResizeObserver sees no further
+    // change.  Fix: strip the src so the app doesn't load until we have
+    // real dimensions, then restore it.
+    if (document.documentElement.clientWidth === 0 && typeof ResizeObserver !== "undefined") {{
+      iframe.removeAttribute("src");
+      var _ro = new ResizeObserver(function() {{
+        if (document.documentElement.clientWidth > 0) {{
+          _ro.disconnect();
+          iframe.src = "/app";
+        }}
+      }});
+      _ro.observe(document.documentElement);
+    }}
   }}
 
   // ---- Boot ----

@@ -73,7 +73,7 @@ class DummyUIManager:
     async def finish_tool_execution(self, result=None, success=True):
         self._finish_calls.append((result, success))
 
-    def do_confirm_tool_execution(self, tool_name, arguments):
+    async def do_confirm_tool_execution(self, tool_name, arguments):
         return True
 
     async def start_tool_execution(self, tool_name, arguments):
@@ -99,7 +99,7 @@ class DummyUIManagerNoFinish:
     async def finish_tool_execution(self, result=None, success=True):
         pass
 
-    def do_confirm_tool_execution(self, tool_name, arguments):
+    async def do_confirm_tool_execution(self, tool_name, arguments):
         return True
 
     async def start_tool_execution(self, tool_name, arguments):
@@ -109,7 +109,7 @@ class DummyUIManagerNoFinish:
 class ConfirmDenyUIManager(DummyUIManager):
     """UI manager that denies tool confirmation."""
 
-    def do_confirm_tool_execution(self, tool_name, arguments):
+    async def do_confirm_tool_execution(self, tool_name, arguments):
         return False
 
 
@@ -1476,7 +1476,7 @@ class TestCheckReferencesBlocking:
         with (
             patch.object(tp, "_should_confirm_tool", return_value=False),
             patch(
-                "mcp_cli.chat.tool_processor.get_tool_state",
+                "mcp_cli.chat.tool_processor.get_agent_tool_state",
                 return_value=mock_tool_state,
             ),
         ):
@@ -1540,7 +1540,9 @@ class TestUngroundedPreconditionFail:
 
         with (
             patch.object(tp, "_should_confirm_tool", return_value=False),
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
         ):
             await tp.process_tool_calls([tc])
 
@@ -1616,7 +1618,9 @@ class TestSoftBlockRepair:
 
         with (
             patch.object(tp, "_should_confirm_tool", return_value=False),
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
         ):
             await tp.process_tool_calls([tc])
 
@@ -1641,7 +1645,9 @@ class TestSoftBlockRepair:
 
         with (
             patch.object(tp, "_should_confirm_tool", return_value=False),
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
         ):
             await tp.process_tool_calls([tc])
 
@@ -1667,7 +1673,9 @@ class TestSoftBlockRepair:
 
         with (
             patch.object(tp, "_should_confirm_tool", return_value=False),
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
         ):
             await tp.process_tool_calls([tc])
 
@@ -1729,7 +1737,9 @@ class TestPerToolLimitBlocking:
 
         with (
             patch.object(tp, "_should_confirm_tool", return_value=False),
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
         ):
             await tp.process_tool_calls([tc])
 
@@ -1798,7 +1808,9 @@ class TestRequiresJustification:
         mock_search_engine = MagicMock()
 
         with (
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
             patch(
                 "mcp_cli.chat.tool_processor.get_search_engine",
                 return_value=mock_search_engine,
@@ -1857,7 +1869,9 @@ class TestDiscoveryToolResult:
         mock_search_engine = MagicMock()
 
         with (
-            patch("mcp_cli.chat.tool_processor.get_tool_state", return_value=mock_ts),
+            patch(
+                "mcp_cli.chat.tool_processor.get_agent_tool_state", return_value=mock_ts
+            ),
             patch(
                 "mcp_cli.chat.tool_processor.get_search_engine",
                 return_value=mock_search_engine,

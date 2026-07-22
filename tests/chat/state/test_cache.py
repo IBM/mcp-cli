@@ -101,8 +101,8 @@ class TestResultCache:
         cache.store_variable("sigma", 5.5)
 
         stats = cache.get_stats()
-        assert stats["total_cached"] == 1
-        assert stats["total_variables"] == 1
+        assert stats.total_cached == 1
+        assert stats.total_variables == 1
 
     def test_format_duplicate_message(self, cache):
         """Test format_duplicate_message."""

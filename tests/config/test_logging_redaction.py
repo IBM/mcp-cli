@@ -16,6 +16,15 @@ from mcp_cli.config.logging import (
 )
 
 
+def _close_file_handlers():
+    """Close and remove all file handlers from the root logger."""
+    root = logging.getLogger()
+    for h in root.handlers[:]:
+        if hasattr(h, "baseFilename"):
+            h.close()
+            root.removeHandler(h)
+
+
 class TestSecretRedactingFilter:
     """Verify each redaction pattern works correctly."""
 
@@ -127,6 +136,7 @@ class TestSetupLoggingFileHandler:
         assert SecretRedactingFilter in filter_types
 
         # Clean up
+        _close_file_handlers()
         setup_logging(level="WARNING")
 
     def test_file_handler_creates_parent_dirs(self, tmp_path):
@@ -136,6 +146,7 @@ class TestSetupLoggingFileHandler:
         assert (tmp_path / "subdir" / "nested").is_dir()
 
         # Clean up
+        _close_file_handlers()
         setup_logging(level="WARNING")
 
     def test_file_handler_writes_json(self, tmp_path):
@@ -163,6 +174,7 @@ class TestSetupLoggingFileHandler:
                 assert "level" in parsed
 
         # Clean up
+        _close_file_handlers()
         setup_logging(level="WARNING")
 
     def test_file_handler_redacts_secrets(self, tmp_path):
@@ -180,6 +192,7 @@ class TestSetupLoggingFileHandler:
         assert "[REDACTED]" in content
 
         # Clean up
+        _close_file_handlers()
         setup_logging(level="WARNING")
 
     def test_tilde_expansion(self):

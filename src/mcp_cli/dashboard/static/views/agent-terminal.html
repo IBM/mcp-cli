@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Terminal</title>
+<!-- marked.js for markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<!-- highlight.js for syntax highlighting (common languages only) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/typescript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/bash.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/json.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/sql.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/yaml.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+:root {
+  --dash-bg: #1e1e2e; --dash-bg-surface: #262637; --dash-bg-hover: #2e2e42;
+  --dash-fg: #e0e0e0; --dash-fg-muted: #888899;
+  --dash-accent: #7aa2f7; --dash-success: #9ece6a; --dash-warning: #e0af68;
+  --dash-error: #f7768e; --dash-info: #7dcfff; --dash-border: #3b3b52;
+  --dash-font-mono: 'JetBrains Mono','Fira Code',monospace;
+  --dash-font-ui: 'Inter',-apple-system,sans-serif;
+  --dash-font-size: 13px; --dash-radius: 6px; --dash-spacing: 8px;
+}
+body {
+  background: var(--dash-bg);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-ui);
+  font-size: var(--dash-font-size);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ── Messages ─────────────────────────────────────────────────── */
+#messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#messages::-webkit-scrollbar { width: 6px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--dash-border); border-radius: 3px; }
+
+.msg { display: flex; gap: 8px; max-width: 90%; }
+.msg.user { align-self: flex-end; flex-direction: row-reverse; }
+.msg.assistant { align-self: flex-start; }
+.msg.tool-call { align-self: flex-start; max-width: 100%; }
+
+.msg-bubble {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 8px 12px;
+  min-width: 60px;
+}
+.msg.user .msg-bubble {
+  background: var(--dash-accent);
+  color: var(--dash-bg);
+  border-color: var(--dash-accent);
+}
+
+.msg-role {
+  font-size: 10px;
+  color: var(--dash-fg-muted);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Markdown content */
+.msg-content { font-size: 13px; line-height: 1.5; }
+.msg-content p { margin-bottom: 6px; }
+.msg-content p:last-child { margin-bottom: 0; }
+.msg-content code { font-family: var(--dash-font-mono); background: var(--dash-bg); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.msg-content pre { background: var(--dash-bg); border: 1px solid var(--dash-border); border-radius: var(--dash-radius); padding: 8px; overflow-x: auto; margin: 6px 0; }
+.msg-content pre code { background: none; padding: 0; }
+.msg-content ul, .msg-content ol { padding-left: 20px; margin: 4px 0; }
+.msg-content h1,.msg-content h2,.msg-content h3 { margin: 8px 0 4px; font-size: 14px; }
+
+/* Streaming cursor */
+.streaming::after { content: '▌'; animation: blink 0.7s step-end infinite; color: var(--dash-accent); }
+@keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+
+/* Tool call card */
+.tool-card {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-left: 3px solid var(--dash-accent);
+  border-radius: var(--dash-radius);
+  font-size: 12px;
+  overflow: hidden;
+  width: 100%;
+}
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  background: var(--dash-bg-hover);
+}
+.tool-card-header:hover { background: var(--dash-bg); }
+.tool-name { font-family: var(--dash-font-mono); font-weight: 600; color: var(--dash-accent); }
+.tool-dur  { color: var(--dash-fg-muted); font-size: 11px; margin-left: auto; }
+.tool-status { font-size: 11px; }
+.tool-status.ok  { color: var(--dash-success); }
+.tool-status.err { color: var(--dash-error); }
+.tool-body {
+  display: none;
+  padding: 8px 10px;
+  font-family: var(--dash-font-mono);
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.tool-card.expanded .tool-body { display: block; }
+
+/* Reasoning block */
+.reasoning-block {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  font-style: italic;
+  width: 100%;
+}
+.reasoning-header {
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.reasoning-content {
+  display: none;
+  padding: 6px 10px;
+  white-space: pre-wrap;
+}
+.reasoning-block.expanded .reasoning-content { display: block; }
+
+/* Search bar */
+#search-bar {
+  display: none;
+  position: absolute;
+  top: 4px;
+  right: 12px;
+  z-index: 20;
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 4px 8px;
+  gap: 6px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+#search-bar.open { display: flex; }
+#search-bar input {
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: 3px;
+  color: var(--dash-fg);
+  font-size: 12px;
+  padding: 2px 6px;
+  width: 180px;
+  outline: none;
+  font-family: var(--dash-font-ui);
+}
+#search-bar input:focus { border-color: var(--dash-accent); }
+#search-bar .search-count { font-size: 11px; color: var(--dash-fg-muted); min-width: 40px; text-align: center; }
+#search-bar button {
+  background: transparent;
+  border: 1px solid var(--dash-border);
+  border-radius: 3px;
+  color: var(--dash-fg-muted);
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+#search-bar button:hover { background: var(--dash-bg-hover); color: var(--dash-fg); }
+.search-highlight { background: rgba(255, 200, 50, 0.3); border-radius: 2px; }
+.search-highlight.current { background: rgba(255, 200, 50, 0.6); }
+
+/* Scroll-to-bottom */
+#scroll-btn {
+  display: none;
+  position: absolute;
+  bottom: 72px;
+  right: 12px;
+  background: var(--dash-accent);
+  color: var(--dash-bg);
+  border: none;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* ── Status bar ───────────────────────────────────────────────── */
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  background: var(--dash-bg-surface);
+  border-top: 1px solid var(--dash-border);
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  flex-shrink: 0;
+}
+#status-text { flex: 1; }
+#token-count { font-family: var(--dash-font-mono); }
+
+/* ── Input ────────────────────────────────────────────────────── */
+#input-area {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--dash-bg-surface);
+  border-top: 1px solid var(--dash-border);
+  flex-shrink: 0;
+  align-items: flex-end;
+}
+#input-area textarea {
+  flex: 1;
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  color: var(--dash-fg);
+  font-family: var(--dash-font-ui);
+  font-size: 13px;
+  padding: 6px 10px;
+  resize: none;
+  line-height: 1.4;
+  min-height: 34px;
+  max-height: 120px;
+  overflow-y: auto;
+  outline: none;
+}
+#input-area textarea:focus { border-color: var(--dash-accent); }
+#send-btn {
+  background: var(--dash-accent);
+  color: var(--dash-bg);
+  border: none;
+  border-radius: var(--dash-radius);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--dash-font-ui);
+  flex-shrink: 0;
+  align-self: flex-end;
+  height: 34px;
+}
+#send-btn:hover { opacity: 0.9; }
+
+/* ── Attach button & staging ─────────────────────────────────── */
+#attach-btn {
+  background: none;
+  border: 1px solid var(--dash-border);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--dash-fg);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+#attach-btn:hover { background: var(--dash-bg-hover); }
+
+#staging-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px;
+}
+#staging-strip:empty { display: none; }
+.staged-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--dash-bg-hover);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--dash-fg);
+}
+.staged-file .remove-staged {
+  cursor: pointer;
+  opacity: 0.6;
+  margin-left: 2px;
+}
+.staged-file .remove-staged:hover { opacity: 1; }
+.staged-thumb {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+#drop-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 3px dashed var(--dash-accent);
+  pointer-events: none;
+}
+
+/* Scroll container — must be flex to constrain #messages height */
+#messages-wrapper {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Attachment UI ─────────────────────────────────────────────── */
+.attachment-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.att-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--dash-bg); border: 1px solid var(--dash-border);
+  border-radius: 4px; padding: 3px 8px; font-size: 11px;
+  color: var(--dash-fg-muted); cursor: default;
+}
+.att-badge .att-icon { font-size: 13px; }
+.att-badge .att-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-badge .att-size { font-size: 10px; opacity: 0.7; }
+.att-image-preview {
+  max-width: 200px; max-height: 150px; border-radius: var(--dash-radius);
+  border: 1px solid var(--dash-border); margin-top: 4px; cursor: pointer;
+}
+.att-image-preview:hover { opacity: 0.85; }
+.att-text-preview {
+  background: var(--dash-bg); border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius); padding: 6px 8px; margin-top: 4px;
+  font-family: var(--dash-font-mono); font-size: 11px; white-space: pre-wrap;
+  max-height: 80px; overflow: hidden; cursor: pointer; position: relative;
+}
+.att-text-preview.expanded { max-height: none; }
+.att-text-preview .att-text-fade {
+  position: absolute; bottom: 0; left: 0; right: 0; height: 30px;
+  background: linear-gradient(transparent, var(--dash-bg)); pointer-events: none;
+}
+.att-text-preview.expanded .att-text-fade { display: none; }
+.att-audio-player { margin-top: 4px; width: 100%; max-width: 280px; height: 32px; }
+
+/* ── Responsive: narrow panel / small screen ──────────────────── */
+#messages {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 500px) {
+  .msg { max-width: 96%; }
+  .msg-bubble { padding: 6px 10px; }
+  .msg-content { font-size: 12px; line-height: 1.45; }
+  .msg-content pre { padding: 6px; font-size: 11px; }
+  .msg-content code { font-size: 11px; }
+  .msg-content h1,.msg-content h2,.msg-content h3 { font-size: 13px; }
+  .tool-card-header { padding: 4px 8px; gap: 4px; }
+  .tool-name { font-size: 11px; }
+  .tool-dur { font-size: 10px; }
+  .tool-body { font-size: 10px; max-height: 200px; }
+  .reasoning-header { font-size: 9px; }
+  .reasoning-content { font-size: 10px; }
+  #input-area { padding: 6px 8px; gap: 6px; }
+  #input-area textarea {
+    font-size: 16px; /* prevent iOS zoom */
+    padding: 8px 10px;
+    min-height: 40px;
+  }
+  #send-btn { padding: 8px 14px; height: 40px; }
+  #attach-btn { width: 40px; height: 40px; font-size: 20px; }
+  #status-bar { padding: 3px 8px; font-size: 10px; gap: 6px; }
+  #search-bar input { width: 120px; }
+  #scroll-btn { padding: 6px 12px; font-size: 12px; }
+  .staged-file { font-size: 11px; padding: 3px 8px; }
+  .staged-thumb { width: 28px; height: 28px; }
+  .att-badge { padding: 2px 6px; font-size: 10px; }
+  .att-badge .att-name { max-width: 100px; }
+  .att-image-preview { max-width: 150px; max-height: 100px; }
+}
+
+@media (max-width: 320px) {
+  #status-bar { display: none; }
+  .msg-role { display: none; }
+  .msg { max-width: 100%; }
+  .msg-content { font-size: 11px; }
+  #staging-strip { padding: 0 6px; }
+}
+
+/* Touch-friendly targets */
+@media (pointer: coarse) {
+  #send-btn { min-height: 44px; padding: 10px 16px; }
+  #attach-btn { width: 44px; height: 44px; }
+  #search-bar button { min-height: 36px; min-width: 36px; padding: 6px 10px; }
+  #scroll-btn { min-height: 40px; padding: 8px 14px; }
+}
+</style>
+</head>
+<body>
+
+<div id="messages-wrapper">
+  <div id="search-bar">
+    <input type="text" id="search-input" placeholder="Search messages…">
+    <span class="search-count" id="search-count"></span>
+    <button id="search-prev" title="Previous">↑</button>
+    <button id="search-next" title="Next">↓</button>
+    <button id="search-close" title="Close">×</button>
+  </div>
+  <div id="messages"></div>
+  <button id="scroll-btn">↓</button>
+</div>
+
+<div id="status-bar">
+  <span id="status-text">idle</span>
+  <span id="token-count"></span>
+</div>
+
+<div id="staging-strip"></div>
+<div id="input-area">
+  <button id="attach-btn" title="Attach file (+)">+</button>
+  <input type="file" id="file-input" multiple accept="image/*,.heic,audio/*,.txt,.md,.csv,.json,.py,.js,.ts,.html,.xml,.yaml,.yml,.sh,.rs,.go,.java,.c,.cpp,.h,.rb,.swift,.sql,.toml,.ini,.cfg,.log" hidden>
+  <textarea id="chat-input" placeholder="Type a message… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+  <button id="send-btn">Send</button>
+</div>
+<div id="drop-overlay">Drop files here</div>
+
+<script>
+'use strict';
+
+const PROTOCOL = 'mcp-dashboard';
+const VERSION  = 1;
+
+const messagesEl  = document.getElementById('messages');
+const inputEl     = document.getElementById('chat-input');
+const sendBtn     = document.getElementById('send-btn');
+const statusText  = document.getElementById('status-text');
+const tokenCount  = document.getElementById('token-count');
+const scrollBtn   = document.getElementById('scroll-btn');
+const wrapper     = document.getElementById('messages-wrapper');
+
+const attachBtn   = document.getElementById('attach-btn');
+const fileInput   = document.getElementById('file-input');
+const stagingStrip = document.getElementById('staging-strip');
+const dropOverlay = document.getElementById('drop-overlay');
+
+let autoScroll      = true;
+let streamingBubble = null; // current streaming message bubble
+let stagedFiles     = [];   // [{name, data (base64), mime_type, thumb?}]
+let streamingContent = '';
+let _hadStreamingTokens = false; // true when CONVERSATION_TOKEN events built current response
+let _agentName      = '';   // agent_id from INIT (shown in status bar when not "default")
+
+// Configure marked
+if (typeof marked !== 'undefined') {
+  marked.setOptions({ breaks: true, gfm: true });
+}
+
+// ── postMessage handler ─────────────────────────────────────────
+window.addEventListener('message', (evt) => {
+  const msg = evt.data;
+  if (!msg || msg.protocol !== PROTOCOL) return;
+
+  switch (msg.type) {
+    case 'INIT':
+      applyTheme(msg.payload.theme || {});
+      if (msg.payload.agent_id && msg.payload.agent_id !== 'default') {
+        _agentName = msg.payload.agent_id;
+      }
+      sendReady();
+      break;
+    case 'THEME':
+      applyTheme(msg.payload);
+      break;
+    case 'CONVERSATION_MESSAGE':
+      handleConversationMessage(msg.payload);
+      break;
+    case 'CONVERSATION_TOKEN':
+      handleToken(msg.payload);
+      break;
+    case 'CONVERSATION_HISTORY':
+      handleConversationHistory(msg.payload);
+      break;
+    case 'AGENT_STATE':
+      updateStatus(msg.payload);
+      break;
+    case 'CONFIG_STATE':
+      handleConfigState(msg.payload);
+      break;
+    case 'TOOL_RESULT':
+      // Tool results are shown inline as tool cards
+      // (the assistant message with tool_calls is sent separately)
+      break;
+  }
+});
+
+// Works both as embedded iframe and as a popout window
+function getShell() {
+  if (window.parent !== window) return window.parent; // embedded iframe
+  if (window.opener) return window.opener;            // popup window
+  return null;
+}
+
+function sendReady() {
+  const shell = getShell();
+  if (!shell) return;
+  shell.postMessage({
+    protocol: PROTOCOL, version: VERSION,
+    type: 'READY',
+    payload: { name: 'Agent Terminal', icon: 'terminal', accepts: ['CONVERSATION_MESSAGE', 'CONVERSATION_TOKEN', 'CONVERSATION_HISTORY', 'AGENT_STATE', 'CONFIG_STATE'], version: 1 }
+  }, '*');
+}
+
+// ── Theme ───────────────────────────────────────────────────────
+function applyTheme(t) {
+  const r = document.documentElement;
+  const set = (k, v) => v && r.style.setProperty(k, v);
+  set('--dash-bg', t.bg); set('--dash-bg-surface', t.bg_surface);
+  set('--dash-bg-hover', t.bg_hover); set('--dash-fg', t.fg);
+  set('--dash-fg-muted', t.fg_muted); set('--dash-accent', t.accent);
+  set('--dash-success', t.success); set('--dash-warning', t.warning);
+  set('--dash-error', t.error); set('--dash-info', t.info);
+  set('--dash-border', t.border); set('--dash-font-mono', t.font_mono);
+  set('--dash-font-ui', t.font_ui); set('--dash-font-size', t.font_size);
+  set('--dash-radius', t.radius); set('--dash-spacing', t.spacing);
+}
+
+// ── Messages ────────────────────────────────────────────────────
+function handleConversationMessage(payload) {
+  // Finish any in-progress streaming
+  if (streamingBubble) finaliseStreaming();
+
+  const { role, content, streaming, tool_calls, reasoning } = payload;
+
+  // Tool-role messages are raw results — they belong in the activity stream, not chat
+  if (role === 'tool') return;
+
+  const wasTokenStreamed = _hadStreamingTokens;
+  _hadStreamingTokens = false;
+
+  // For streaming assistant responses, CONVERSATION_TOKEN already built the bubble —
+  // this message is just the server's canonical copy; skip adding a duplicate.
+  if (streaming && role === 'assistant' && wasTokenStreamed) return;
+
+  if (reasoning) {
+    addReasoningBlock(reasoning);
+  }
+
+  if (tool_calls && tool_calls.length > 0) {
+    for (const tc of tool_calls) {
+      addToolCard(tc);
+    }
+    return; // tool_calls shown as cards; content usually empty
+  }
+
+  if (!content && !(payload.attachments && payload.attachments.length)) return;
+
+  const bubble = addMessageBubble(role, content || '', streaming);
+
+  // Render attachment badges / previews if present
+  if (payload.attachments && payload.attachments.length > 0) {
+    renderAttachments(bubble, payload.attachments);
+  }
+
+  if (streaming) {
+    streamingBubble = bubble;
+    streamingContent = content || '';
+    bubble.classList.add('streaming');
+  }
+}
+
+function handleToken(payload) {
+  if (payload.done) {
+    if (streamingBubble) finaliseStreaming();
+    return;
+  }
+  const token = payload.token || '';
+  _hadStreamingTokens = true;
+  if (!streamingBubble) {
+    // Start new streaming bubble
+    streamingBubble = addMessageBubble('assistant', token, true);
+    streamingBubble.classList.add('streaming');
+    streamingContent = token;
+  } else {
+    streamingContent += token;
+    renderBubbleContent(streamingBubble, streamingContent, true);
+  }
+  if (autoScroll) wrapper.scrollTop = wrapper.scrollHeight;
+}
+
+function finaliseStreaming() {
+  if (!streamingBubble) return;
+  streamingBubble.classList.remove('streaming');
+  renderBubbleContent(streamingBubble, streamingContent, false);
+  highlightCode(streamingBubble);
+  streamingBubble = null;
+  streamingContent = '';
+  if (autoScroll) wrapper.scrollTop = wrapper.scrollHeight;
+}
+
+function addMessageBubble(role, content, streaming) {
+  const wrap = document.createElement('div');
+  wrap.className = `msg ${role}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'msg-role';
+  roleLabel.textContent = role === 'user' ? 'You' : role === 'assistant' ? 'Agent' : role;
+  bubble.appendChild(roleLabel);
+
+  const content_el = document.createElement('div');
+  content_el.className = 'msg-content';
+  bubble.appendChild(content_el);
+  wrap.appendChild(bubble);
+  messagesEl.appendChild(wrap);
+
+  renderBubbleContent(bubble, content || '', streaming);
+  if (!streaming) highlightCode(bubble);
+
+  scrollIfAuto();
+  return bubble;
+}
+
+function renderBubbleContent(bubble, text, streaming) {
+  const contentEl = bubble.querySelector('.msg-content');
+  if (!contentEl) return;
+  if (typeof marked !== 'undefined' && !streaming) {
+    try {
+      const html = marked.parse(text);
+      // Sanitize: strip <script>, event handlers, and dangerous URIs
+      const sanitized = html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/\son\w+\s*=/gi, ' data-removed=')
+        .replace(/href\s*=\s*["']javascript:/gi, 'href="');
+      contentEl.innerHTML = sanitized;
+      return;
+    } catch (e) {
+      console.error('Markdown parse error:', e);
+    }
+  }
+  // Fallback: plain text
+  contentEl.textContent = text;
+}
+
+function highlightCode(el) {
+  if (typeof hljs === 'undefined') return;
+  el.querySelectorAll('pre code').forEach((block) => {
+    hljs.highlightElement(block);
+  });
+}
+
+function addToolCard(tc) {
+  const fnName = tc.function?.name || tc.name || 'tool';
+  const args   = tc.function?.arguments || tc.arguments || '';
+
+  const card = document.createElement('div');
+  card.className = 'tool-card msg tool-call';
+
+  const header = document.createElement('div');
+  header.className = 'tool-card-header';
+  header.innerHTML = `<span class="tool-name">🔧 ${esc(fnName)}</span><span class="tool-status ok">pending</span><span class="tool-dur"></span>`;
+  card.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'tool-body';
+  try {
+    body.textContent = JSON.stringify(JSON.parse(args), null, 2);
+  } catch {
+    body.textContent = args;
+  }
+  card.appendChild(body);
+
+  header.addEventListener('click', () => card.classList.toggle('expanded'));
+  messagesEl.appendChild(card);
+  scrollIfAuto();
+}
+
+function addReasoningBlock(text) {
+  const block = document.createElement('div');
+  block.className = 'reasoning-block msg assistant';
+  block.innerHTML = `
+    <div class="reasoning-header">💭 Thinking (click to expand)</div>
+    <div class="reasoning-content">${esc(text)}</div>`;
+  block.querySelector('.reasoning-header').addEventListener('click', () => block.classList.toggle('expanded'));
+  messagesEl.appendChild(block);
+  scrollIfAuto();
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Status ──────────────────────────────────────────────────────
+let _currentModel = '';
+let _totalTokens = 0;
+
+function updateStatus(payload) {
+  const { status, current_tool, tokens_used, turn_number } = payload;
+  let text = status || 'idle';
+  if (status === 'tool_calling' && current_tool) text = `calling ${current_tool}…`;
+  else if (status === 'thinking') text = 'thinking…';
+  else if (status === 'idle') text = 'idle';
+  if (_agentName) text = `[${_agentName}] ${text}`;
+  statusText.textContent = text;
+
+  if (tokens_used) _totalTokens += tokens_used;
+
+  let countParts = [];
+  if (_currentModel) countParts.push(_currentModel);
+  if (_totalTokens) countParts.push(`${_totalTokens.toLocaleString()} tokens`);
+  if (turn_number) countParts.push(`turn ${turn_number}`);
+  tokenCount.textContent = countParts.join(' · ');
+}
+
+// ── Config state (model display) ─────────────────────────────────
+function handleConfigState(payload) {
+  _currentModel = payload.model || '';
+  // Update status bar with model name
+  const parts = [];
+  if (_currentModel) parts.push(_currentModel);
+  const existing = tokenCount.textContent;
+  // Preserve token/turn info if present
+  if (existing) {
+    const segments = existing.split(' · ').filter(s => !s.match(/^[a-z]/i) || s.includes('token') || s.includes('turn'));
+    parts.push(...segments);
+  }
+  tokenCount.textContent = parts.join(' · ');
+}
+
+// ── Conversation history replay ──────────────────────────────────
+function handleConversationHistory(payload) {
+  const messages = payload.messages || [];
+  // Clear current messages and replay history (empty array = clear all)
+  messagesEl.innerHTML = '';
+  streamingBubble = null;
+  streamingContent = '';
+  _hadStreamingTokens = false;
+
+  for (const msg of messages) {
+    handleConversationMessage(msg);
+  }
+  // Scroll to bottom after replay
+  wrapper.scrollTop = wrapper.scrollHeight;
+  autoScroll = true;
+}
+
+// ── Scroll ──────────────────────────────────────────────────────
+wrapper.addEventListener('scroll', () => {
+  autoScroll = wrapper.scrollHeight - wrapper.scrollTop - wrapper.clientHeight < 40;
+  scrollBtn.style.display = autoScroll ? 'none' : 'block';
+}, { passive: true });
+
+scrollBtn.addEventListener('click', () => {
+  wrapper.scrollTop = wrapper.scrollHeight;
+  autoScroll = true;
+  scrollBtn.style.display = 'none';
+});
+
+function scrollIfAuto() {
+  if (autoScroll) wrapper.scrollTop = wrapper.scrollHeight;
+}
+
+// ── File staging ─────────────────────────────────────────────────
+function stageFile(file) {
+  if (file.size > 20 * 1024 * 1024) {
+    showNotification('File too large: ' + file.name + ' (max 20 MB)', 'error');
+    return;
+  }
+  if (stagedFiles.length >= 10) {
+    showNotification('Max 10 attachments per message', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const b64 = reader.result.split(',')[1];
+    const entry = { name: file.name, data: b64, mime_type: file.type || 'application/octet-stream' };
+    if (file.type.startsWith('image/')) entry.thumb = reader.result;
+    stagedFiles.push(entry);
+    renderStagingStrip();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderStagingStrip() {
+  stagingStrip.innerHTML = '';
+  stagedFiles.forEach((f, i) => {
+    const badge = document.createElement('span');
+    badge.className = 'staged-file';
+    if (f.thumb) {
+      const img = document.createElement('img');
+      img.src = f.thumb;
+      img.className = 'staged-thumb';
+      badge.appendChild(img);
+    }
+    badge.appendChild(document.createTextNode(f.name));
+    const rm = document.createElement('span');
+    rm.className = 'remove-staged';
+    rm.textContent = '\u2715';
+    rm.onclick = () => { stagedFiles.splice(i, 1); renderStagingStrip(); };
+    badge.appendChild(rm);
+    stagingStrip.appendChild(badge);
+  });
+}
+
+function showNotification(message, level) {
+  const shell = getShell();
+  if (shell) {
+    shell.postMessage({ protocol: PROTOCOL, version: VERSION, type: 'NOTIFY', payload: { message, level: level || 'info', duration_ms: 4000 } }, '*');
+  }
+}
+
+attachBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+  for (const file of e.target.files) stageFile(file);
+  e.target.value = '';
+});
+
+// ── Drag and drop ───────────────────────────────────────────────
+document.documentElement.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropOverlay.style.display = 'flex';
+});
+document.documentElement.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) dropOverlay.style.display = 'none';
+});
+document.documentElement.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropOverlay.style.display = 'none';
+  for (const file of e.dataTransfer.files) stageFile(file);
+});
+
+// ── Clipboard paste (images) ────────────────────────────────────
+inputEl.addEventListener('paste', (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind === 'file') {
+      e.preventDefault();
+      stageFile(item.getAsFile());
+    }
+  }
+});
+
+// ── Input ────────────────────────────────────────────────────────
+function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text && stagedFiles.length === 0) return;
+  inputEl.value = '';
+  inputEl.style.height = '';
+
+  const shell = getShell();
+  if (!shell) return;
+
+  const files = stagedFiles.length > 0 ? stagedFiles.map(f => ({
+    name: f.name, data: f.data, mime_type: f.mime_type
+  })) : undefined;
+
+  if (text.startsWith('/')) {
+    shell.postMessage({ protocol: PROTOCOL, version: VERSION, type: 'USER_COMMAND', payload: { command: text } }, '*');
+  } else {
+    shell.postMessage({ protocol: PROTOCOL, version: VERSION, type: 'USER_MESSAGE', payload: { content: text || '', files: files } }, '*');
+  }
+
+  stagedFiles = [];
+  renderStagingStrip();
+}
+
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+});
+
+sendBtn.addEventListener('click', sendMessage);
+
+// ── Search in chat ───────────────────────────────────────────────
+const searchBar   = document.getElementById('search-bar');
+const searchInput = document.getElementById('search-input');
+const searchCount = document.getElementById('search-count');
+let _searchMatches = [];
+let _searchIdx = -1;
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault();
+    searchBar.classList.add('open');
+    searchInput.focus();
+    searchInput.select();
+  }
+  if (e.key === 'Escape' && searchBar.classList.contains('open')) {
+    closeSearch();
+  }
+});
+
+searchInput.addEventListener('input', () => performSearch(searchInput.value));
+document.getElementById('search-prev').addEventListener('click', () => navigateSearch(-1));
+document.getElementById('search-next').addEventListener('click', () => navigateSearch(1));
+document.getElementById('search-close').addEventListener('click', closeSearch);
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); navigateSearch(e.shiftKey ? -1 : 1); }
+});
+
+function performSearch(query) {
+  clearHighlights();
+  _searchMatches = [];
+  _searchIdx = -1;
+  if (!query.trim()) { searchCount.textContent = ''; return; }
+
+  const q = query.toLowerCase();
+  const contentEls = messagesEl.querySelectorAll('.msg-content');
+  for (const el of contentEls) {
+    const text = el.textContent || '';
+    if (text.toLowerCase().includes(q)) {
+      // Highlight matches in this element
+      highlightInElement(el, q);
+    }
+  }
+  _searchMatches = Array.from(messagesEl.querySelectorAll('.search-highlight'));
+  searchCount.textContent = _searchMatches.length ? `${_searchMatches.length} found` : 'none';
+  if (_searchMatches.length) navigateSearch(1);
+}
+
+function highlightInElement(el, query) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  for (const node of textNodes) {
+    const text = node.textContent;
+    const lower = text.toLowerCase();
+    const idx = lower.indexOf(query);
+    if (idx === -1) continue;
+    const before = text.slice(0, idx);
+    const match  = text.slice(idx, idx + query.length);
+    const after  = text.slice(idx + query.length);
+    const span = document.createElement('span');
+    span.className = 'search-highlight';
+    span.textContent = match;
+    const parent = node.parentNode;
+    if (before) parent.insertBefore(document.createTextNode(before), node);
+    parent.insertBefore(span, node);
+    if (after) parent.insertBefore(document.createTextNode(after), node);
+    parent.removeChild(node);
+  }
+}
+
+function navigateSearch(dir) {
+  if (!_searchMatches.length) return;
+  if (_searchIdx >= 0 && _searchIdx < _searchMatches.length) {
+    _searchMatches[_searchIdx].classList.remove('current');
+  }
+  _searchIdx = (_searchIdx + dir + _searchMatches.length) % _searchMatches.length;
+  const el = _searchMatches[_searchIdx];
+  el.classList.add('current');
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  searchCount.textContent = `${_searchIdx + 1}/${_searchMatches.length}`;
+}
+
+function clearHighlights() {
+  for (const span of messagesEl.querySelectorAll('.search-highlight')) {
+    const parent = span.parentNode;
+    parent.replaceChild(document.createTextNode(span.textContent), span);
+    parent.normalize();
+  }
+  _searchMatches = [];
+  _searchIdx = -1;
+}
+
+function closeSearch() {
+  searchBar.classList.remove('open');
+  clearHighlights();
+  searchCount.textContent = '';
+  searchInput.value = '';
+}
+
+// ── Attachment rendering ──────────────────────────────────────────────
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '';
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / 1048576).toFixed(1) + 'MB';
+}
+
+function renderAttachments(bubble, attachments) {
+  const strip = document.createElement('div');
+  strip.className = 'attachment-strip';
+  for (const att of attachments) {
+    const kind = att.kind || 'unknown';
+    const icon = kind === 'image' ? '\uD83D\uDDBC\uFE0F' :
+                 kind === 'audio' ? '\uD83C\uDFB5' :
+                 kind === 'text'  ? '\uD83D\uDCC4' : '\uD83D\uDCCE';
+    const badge = document.createElement('div');
+    badge.className = 'att-badge';
+    badge.innerHTML = '<span class="att-icon">' + icon + '</span>' +
+      '<span class="att-name" title="' + esc(att.display_name || '') + '">' + esc(att.display_name || '') + '</span>' +
+      '<span class="att-size">' + formatBytes(att.size_bytes) + '</span>';
+    strip.appendChild(badge);
+
+    if (kind === 'image' && att.preview_url) {
+      const img = document.createElement('img');
+      img.className = 'att-image-preview';
+      img.src = att.preview_url;
+      img.alt = att.display_name || 'image';
+      img.loading = 'lazy';
+      img.addEventListener('click', function() { window.open(att.preview_url, '_blank'); });
+      strip.appendChild(img);
+    }
+    if (kind === 'text' && att.text_preview) {
+      const pre = document.createElement('div');
+      pre.className = 'att-text-preview';
+      pre.textContent = att.text_preview;
+      if (att.text_truncated) {
+        const fade = document.createElement('div');
+        fade.className = 'att-text-fade';
+        pre.appendChild(fade);
+      }
+      pre.addEventListener('click', function() { pre.classList.toggle('expanded'); });
+      strip.appendChild(pre);
+    }
+    if (kind === 'audio' && att.audio_data_uri) {
+      const audio = document.createElement('audio');
+      audio.className = 'att-audio-player';
+      audio.controls = true;
+      audio.src = att.audio_data_uri;
+      strip.appendChild(audio);
+    }
+  }
+  const contentEl = bubble.querySelector('.msg-content');
+  if (contentEl) { contentEl.after(strip); } else { bubble.appendChild(strip); }
+}
+
+// Register hljs languages if available
+if (typeof hljs !== 'undefined') {
+  hljs.registerLanguage && void 0; // already done via script tags
+}
+
+sendReady();
+</script>
+</body>
+</html>

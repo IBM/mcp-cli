@@ -134,8 +134,8 @@ def check_provider_token_status(
                 provider_name, namespace="provider"
             )
             in_storage = bool(stored)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Token storage check failed for %s: %s", provider_name, e)
 
     # Determine source and overall status
     if in_env:

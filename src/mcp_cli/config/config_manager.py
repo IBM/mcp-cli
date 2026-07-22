@@ -24,6 +24,7 @@ from mcp_cli.tools.models import ServerInfo, TransportType
 
 # Import clean models from new config system
 from mcp_cli.config.models import (
+    MCPConfig as ModelsMCPConfig,
     TimeoutConfig as CleanTimeoutConfig,
     ToolConfig as CleanToolConfig,
 )
@@ -439,7 +440,7 @@ def initialize_config(config_path: Path | None = None) -> MCPConfig:
 
 
 def detect_server_types(
-    cfg: MCPConfig, servers: list[str]
+    cfg: MCPConfig | ModelsMCPConfig, servers: list[str]
 ) -> tuple[list[dict], list[str]]:
     """
     Detect which servers are HTTP vs STDIO based on configuration.
@@ -494,7 +495,7 @@ def detect_server_types(
 
 
 def validate_server_config(
-    cfg: MCPConfig, servers: list[str]
+    cfg: MCPConfig | ModelsMCPConfig, servers: list[str]
 ) -> tuple[bool, list[str]]:
     """
     Validate server configuration and return status and errors.

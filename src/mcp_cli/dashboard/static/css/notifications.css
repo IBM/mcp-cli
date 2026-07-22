@@ -1,0 +1,100 @@
+/* Notification toast */
+#toast-container {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 8px 12px;
+  font-size: 12px;
+  max-width: 300px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  animation: slideIn 0.2s ease;
+}
+.toast.info { border-left: 3px solid var(--dash-info); }
+.toast.success { border-left: 3px solid var(--dash-success); }
+.toast.warning { border-left: 3px solid var(--dash-warning); }
+.toast.error { border-left: 3px solid var(--dash-error); }
+@keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+/* Tool approval dialog */
+#approval-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 600;
+  align-items: center;
+  justify-content: center;
+}
+#approval-overlay.open { display: flex; }
+#approval-dialog {
+  background: var(--dash-bg-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 16px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+#approval-dialog h3 {
+  font-size: 14px;
+  color: var(--dash-warning);
+  margin-bottom: 8px;
+}
+#approval-dialog .approval-tool {
+  font-family: var(--dash-font-mono);
+  font-size: 13px;
+  color: var(--dash-accent);
+  margin-bottom: 8px;
+}
+#approval-dialog .approval-args {
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  padding: 8px;
+  font-family: var(--dash-font-mono);
+  font-size: 11px;
+  color: var(--dash-fg-muted);
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 12px;
+}
+#approval-dialog .approval-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+#approval-dialog .approval-btns button {
+  padding: 6px 16px;
+  border-radius: var(--dash-radius);
+  border: 1px solid var(--dash-border);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--dash-font-ui);
+}
+#approval-dialog .btn-approve {
+  background: var(--dash-success);
+  color: var(--dash-bg);
+  border-color: var(--dash-success);
+}
+#approval-dialog .btn-deny {
+  background: transparent;
+  color: var(--dash-error);
+  border-color: var(--dash-error);
+}
+#approval-dialog .btn-approve:hover { opacity: 0.9; }
+#approval-dialog .btn-deny:hover { background: var(--dash-bg-hover); }
+
+/* ── Focus styles ─────────────────────────────────────────────────── */
+.btn-approve:focus-visible,
+.btn-deny:focus-visible { outline: 2px solid var(--dash-accent); outline-offset: -2px; }
