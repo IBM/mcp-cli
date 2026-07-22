@@ -25,10 +25,18 @@ websockets = pytest.importorskip("websockets")
 
 
 def _ws_connect(port: int):
-    """Return an async context manager that connects to the WS endpoint."""
+    """Return an async context manager that connects to the WS endpoint.
+
+    Sends a same-origin Origin header, matching what a real browser tab
+    loaded from the dashboard's own host page would send — the server now
+    rejects handshakes with any other Origin (see loopback_origin.py).
+    """
     from websockets.asyncio.client import connect
 
-    return connect(f"ws://localhost:{port}/ws")
+    return connect(
+        f"ws://localhost:{port}/ws",
+        additional_headers={"Origin": f"http://localhost:{port}"},
+    )
 
 
 async def _recv(ws, timeout: float = 2.0):
@@ -310,3 +318,35 @@ class TestBridgeEndToEnd:
 
         registry_msg = next(m for m in msgs if m["type"] == "VIEW_REGISTRY")
         assert any(v["id"] == "stats:main" for v in registry_msg["payload"]["views"])
+
+
+class TestOriginValidation:
+    """The dashboard WebSocket must reject connections from foreign origins."""
+
+    async def test_cross_origin_connection_rejected(self, live_server):
+        from websockets.asyncio.client import connect
+        from websockets.exceptions import InvalidStatus
+
+        _, port = live_server
+        with pytest.raises(InvalidStatus) as exc_info:
+            async with connect(
+                f"ws://localhost:{port}/ws",
+                additional_headers={"Origin": "https://evil-attacker.example"},
+            ):
+                pass
+        assert exc_info.value.response.status_code == 403
+
+    async def test_missing_origin_connection_rejected(self, live_server):
+        from websockets.asyncio.client import connect
+        from websockets.exceptions import InvalidStatus
+
+        _, port = live_server
+        with pytest.raises(InvalidStatus) as exc_info:
+            async with connect(f"ws://localhost:{port}/ws"):
+                pass
+        assert exc_info.value.response.status_code == 403
+
+    async def test_matching_origin_connection_accepted(self, live_server):
+        _, port = live_server
+        async with _ws_connect(port):
+            pass  # no exception = success

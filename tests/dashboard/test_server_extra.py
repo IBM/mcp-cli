@@ -19,9 +19,10 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _req(path: str):
+def _req(path: str, origin: str | None = None):
     r = MagicMock()
     r.path = path
+    r.headers = {"Origin": origin} if origin is not None else {}
     return r
 
 
@@ -63,14 +64,40 @@ class TestProcessRequest:
         from mcp_cli.dashboard.server import DashboardServer
 
         s = DashboardServer()
-        assert s._process_request(MagicMock(), _req("/ws")) is None
+        s._port = 9120
+        origin = f"http://localhost:{s._port}"
+        assert s._process_request(MagicMock(), _req("/ws", origin=origin)) is None
 
     def test_ws_path_with_query_returns_none(self):
         from mcp_cli.dashboard.server import DashboardServer
 
         s = DashboardServer()
+        s._port = 9120
+        origin = f"http://localhost:{s._port}"
         # Query string should be stripped; /ws?foo=bar still routes to WS
-        assert s._process_request(MagicMock(), _req("/ws?foo=bar")) is None
+        assert (
+            s._process_request(MagicMock(), _req("/ws?foo=bar", origin=origin)) is None
+        )
+
+    def test_ws_path_rejects_cross_origin(self):
+        from mcp_cli.dashboard.server import DashboardServer
+
+        s = DashboardServer()
+        s._port = 9120
+        resp = s._process_request(
+            MagicMock(), _req("/ws", origin="https://evil-attacker.example")
+        )
+        assert resp is not None
+        assert resp.status_code == http.HTTPStatus.FORBIDDEN
+
+    def test_ws_path_rejects_missing_origin(self):
+        from mcp_cli.dashboard.server import DashboardServer
+
+        s = DashboardServer()
+        s._port = 9120
+        resp = s._process_request(MagicMock(), _req("/ws"))
+        assert resp is not None
+        assert resp.status_code == http.HTTPStatus.FORBIDDEN
 
     def test_unknown_path_returns_404(self):
         from mcp_cli.dashboard.server import DashboardServer

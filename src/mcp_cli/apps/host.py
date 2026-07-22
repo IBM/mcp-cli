@@ -18,7 +18,6 @@ import logging
 import re
 import webbrowser
 from typing import Any, TYPE_CHECKING
-from urllib.parse import urlsplit
 
 try:
     import websockets
@@ -39,6 +38,7 @@ from mcp_cli.config.defaults import (
     DEFAULT_APP_MAX_CONCURRENT,
     DEFAULT_HTTP_REQUEST_TIMEOUT,
 )
+from mcp_cli.utils.loopback_origin import is_allowed_origin as _is_allowed_origin
 
 if TYPE_CHECKING:
     from mcp_cli.tools.manager import ToolManager
@@ -51,31 +51,6 @@ _MCP_CLI_VERSION = "0.13"
 # Strict regex for CSP source values — reject anything that could break out
 # of an HTML attribute or inject additional directives.
 _SAFE_CSP_SOURCE = re.compile(r"^[a-zA-Z0-9\-.:/*]+$")
-
-# Loopback hostnames the host page can legitimately be served from.
-_ALLOWED_ORIGIN_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-
-
-def _is_allowed_origin(origin: str | None, port: int) -> bool:
-    """Return True if *origin* is the http://localhost:<port> host page origin.
-
-    Real browsers always attach an Origin header to WebSocket handshakes,
-    but — unlike fetch()/XHR — do not enforce same-origin policy on the
-    connection itself; that enforcement is the server's job. Requiring an
-    exact match here (scheme, loopback host, and port) is what actually
-    prevents an unrelated page from attaching to this app's bridge.
-    """
-    if not origin:
-        return False
-    try:
-        parsed = urlsplit(origin)
-    except ValueError:
-        return False
-    if parsed.scheme != "http":
-        return False
-    if parsed.hostname not in _ALLOWED_ORIGIN_HOSTS:
-        return False
-    return parsed.port == port
 
 
 class AppHostServer:

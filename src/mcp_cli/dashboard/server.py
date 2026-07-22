@@ -32,6 +32,8 @@ except ImportError:  # pragma: no cover
         "Dashboard support requires websockets. Install with:  pip install mcp-cli[dashboard]"
     )
 
+from mcp_cli.utils.loopback_origin import is_allowed_origin
+
 logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -43,6 +45,7 @@ class DashboardServer:
     def __init__(self) -> None:
         self._clients: set[ServerConnection] = set()
         self._server: Any = None
+        self._port: int = 0
         # Called when a browser user sends USER_MESSAGE / USER_ACTION / REQUEST_TOOL
         self.on_browser_message: Callable[..., Any] | None = None
         # Called when a new WebSocket client connects (before message loop starts)
@@ -66,6 +69,7 @@ class DashboardServer:
     async def start(self, port: int = 0) -> int:
         """Find an available port and start the server. Returns the bound port."""
         bound_port = await self._find_port(port)
+        self._port = bound_port
 
         self._server = await ws_serve(
             self._ws_handler,
@@ -186,8 +190,27 @@ class DashboardServer:
     ) -> Response | None:
         path = request.path.split("?")[0]  # strip query string
 
-        # WebSocket upgrade — let the library handle it
         if path == "/ws":
+            # Reject cross-origin WebSocket upgrades. Browsers attach an
+            # Origin header to WS handshakes but do not enforce same-origin
+            # policy on them the way they do for fetch()/XHR — enforcement
+            # is the server's responsibility, so any page that knows (or
+            # scans for) this port could otherwise attach to the dashboard
+            # and read/inject conversation state.
+            origin = request.headers.get("Origin")
+            if not is_allowed_origin(origin, self._port):
+                logger.warning(
+                    "Rejected dashboard WebSocket connection: disallowed Origin %r",
+                    origin,
+                )
+                body = b"Forbidden"
+                return Response(
+                    http.HTTPStatus.FORBIDDEN,
+                    "Forbidden",
+                    websockets.Headers({"Content-Length": str(len(body))}),
+                    body,
+                )
+            # Let the library proceed with the WebSocket upgrade
             return None
 
         # Serve static files
