@@ -134,6 +134,18 @@ The bridge rejects tool names not matching `^[a-zA-Z0-9_\-./]+$` per the MCP spe
 
 `_safe_json_dumps()` falls back to `_to_serializable()` on `TypeError`/`ValueError`, with circular reference protection via a visited-object set.
 
+### WebSocket Origin Validation (v0.20.1+)
+
+The local app-host server validates the `Origin` header on every WebSocket upgrade request against the `http://localhost:<port>` (or `127.0.0.1`) host page origin, via `mcp_cli.utils.loopback_origin.is_allowed_origin()`. Browsers attach an `Origin` header to WebSocket handshakes automatically but don't enforce same-origin policy on the connection itself — enforcement has to happen server-side. Handshakes with a mismatched or missing Origin are rejected with HTTP 403 before the upgrade completes.
+
+### Tool Permission Enforcement (v0.20.1+)
+
+`AppInfo.permissions` (from the resource's `_meta.ui.permissions`) is enforced in `AppBridge._handle_tool_call()`: if a resource declares a `tools` allow-list, only tools on that list can be invoked via the bridge, in addition to the existing tool-name syntax check. A resource that declares no permissions keeps the previous unrestricted behavior.
+
+### SSRF-Safe Resource Fetch (v0.20.1+)
+
+Direct HTTP(S) fetches (for `resource_uri` or a tool result's `viewUrl`) are validated with `mcp_cli.utils.url_safety.is_safe_fetch_url()`, which resolves the hostname and rejects private, loopback, link-local, and other non-public address ranges. Redirects are followed manually so each hop is re-validated rather than trusted after the first check.
+
 ## Session Reliability
 
 ### Deferred Tool Result Delivery

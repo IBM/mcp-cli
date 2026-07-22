@@ -1669,7 +1669,7 @@ wheels = [
 
 [[package]]
 name = "mcp-cli"
-version = "0.20"
+version = "0.20.1"
 source = { editable = "." }
 dependencies = [
     { name = "asyncio" },

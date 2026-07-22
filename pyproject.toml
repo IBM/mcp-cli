@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-cli"
-version = "0.20.0"
+version = "0.20.1"
 description = "A cli for the Model Context Provider"
 requires-python = ">=3.11"
 readme = "README.md"

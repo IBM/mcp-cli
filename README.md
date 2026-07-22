@@ -1327,6 +1327,18 @@ mcp-cli --log-file ~/.mcp-cli/logs/debug.log --server sqlite
 - **XSS Prevention**: Tool names and user-supplied content are HTML-escaped before template injection
 - **URL Scheme Validation**: `ui/open-link` only allows `http://` and `https://` schemes
 - **Tool Name Validation**: Bridge rejects tool names not matching the MCP spec character set
+- **WebSocket Origin Validation** (v0.20.1+): The local app-host server rejects any WebSocket handshake whose `Origin` header doesn't match its own `http://localhost:<port>` host page, so an unrelated webpage can't attach to a running app's bridge
+- **Tool Permission Enforcement** (v0.20.1+): When a resource declares an allow-list of tools it may call, the bridge enforces it on every `tools/call` — not just a tool-name syntax check
+- **SSRF-Safe Resource Fetch** (v0.20.1+): Direct HTTP(S) resource fetches are validated against private/loopback/link-local address ranges before connecting, and re-validated at every redirect hop
+
+### Dashboard Security (v0.20.1+)
+- **WebSocket Origin Validation**: The dashboard's WebSocket server applies the same Origin check as MCP Apps
+- **Sanitized Markdown Rendering**: Assistant chat messages are rendered through DOMPurify rather than a hand-rolled sanitizer
+- **Escaped View Metadata**: Server-declared view names and icons are HTML-escaped before being inserted into panel headers
+- **Sanitized Agent/Session Paths**: Agent and session identifiers are sanitized before use as filesystem path components
+
+### Plan Execution Security (v0.20.1+)
+- **Tool Confirmation Enforced**: Plan execution (`/plan`, `plan_create_and_execute`) honors the same confirm-tools preference and trusted-domain policy as the interactive chat path; if confirmation is required and no prompt is available, the call is declined rather than executed unconfirmed
 
 ## 🚀 Performance Features
 
