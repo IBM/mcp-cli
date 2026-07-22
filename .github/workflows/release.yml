@@ -1,0 +1,84 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release for (e.g., v0.20.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Get version from tag
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          TAG="${{ inputs.tag }}"
+        else
+          TAG=${GITHUB_REF#refs/tags/}
+        fi
+        VERSION=${TAG#v}
+        echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Verify version matches pyproject.toml
+      run: |
+        PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+        if [ "${{ steps.get_version.outputs.version }}" != "${PYPROJECT_VERSION}" ]; then
+          echo "Error: Tag version (${{ steps.get_version.outputs.version }}) does not match pyproject.toml version (${PYPROJECT_VERSION})"
+          exit 1
+        fi
+
+    - name: Get previous tag
+      id: get_previous_tag
+      run: |
+        PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -A1 "^${{ steps.get_version.outputs.tag }}$" | tail -1)
+        if [ -z "$PREVIOUS_TAG" ] || [ "$PREVIOUS_TAG" = "${{ steps.get_version.outputs.tag }}" ]; then
+          # No previous tag - fall back to the first commit
+          PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+        fi
+        echo "previous_tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "## What's Changed" > RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+
+        git log "${{ steps.get_previous_tag.outputs.previous_tag }}..${{ steps.get_version.outputs.tag }}" \
+          --pretty=format:"* %s (%h)" \
+          --no-merges >> RELEASE_NOTES.md
+
+        echo "" >> RELEASE_NOTES.md
+        echo "" >> RELEASE_NOTES.md
+        echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.get_previous_tag.outputs.previous_tag }}...${{ steps.get_version.outputs.tag }}" >> RELEASE_NOTES.md
+
+        cat RELEASE_NOTES.md
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.get_version.outputs.tag }}
+        name: Release ${{ steps.get_version.outputs.tag }}
+        body_path: RELEASE_NOTES.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
