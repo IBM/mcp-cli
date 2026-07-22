@@ -15,7 +15,7 @@ jobs:
       runs-on: ubuntu-latest
       steps:
          - name: Checkout code
-           uses: actions/checkout@v6
+           uses: actions/checkout@v7
 
          #      - name: Set up Python
          #        uses: actions/setup-python@v5
@@ -89,7 +89,7 @@ jobs:
                - tests/test_command_consistency.py tests/test_mcp_cli_init.py tests/test_mcp_cli_main_entry.py
       steps:
          - name: Checkout code
-           uses: actions/checkout@v6
+           uses: actions/checkout@v7
 
          #      - name: Set up Python
          #        uses: actions/setup-python@v5
@@ -123,7 +123,7 @@ jobs:
       runs-on: ubuntu-latest
       steps:
          - name: Checkout code
-           uses: actions/checkout@v6
+           uses: actions/checkout@v7
 
          #      - name: Set up Python
          #        uses: actions/setup-python@v5
