@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from mcp_cli.apps.host import AppHostServer, _SAFE_CSP_SOURCE
+from mcp_cli.apps.host import AppHostServer, _is_allowed_origin, _SAFE_CSP_SOURCE
 from mcp_cli.apps.models import AppInfo, AppState
 
 
@@ -1106,7 +1106,7 @@ class TestStartServer:
 
     @pytest.mark.asyncio
     async def test_process_request_ws_returns_none(self):
-        """The process_request closure returns None for '/ws' (WS upgrade)."""
+        """The process_request closure returns None for '/ws' with a matching Origin."""
         from unittest.mock import MagicMock, patch
         from mcp_cli.apps.bridge import AppBridge
 
@@ -1126,6 +1126,117 @@ class TestStartServer:
         fake_conn = MagicMock()
         fake_req = MagicMock()
         fake_req.path = "/ws"
+        fake_req.headers = {"Origin": f"http://localhost:{info.port}"}
+
+        response = captured_process_request(fake_conn, fake_req)
+        assert response is None
+
+    async def test_process_request_ws_rejects_cross_origin(self):
+        """The process_request closure returns 403 for '/ws' with a foreign Origin."""
+        from unittest.mock import MagicMock, patch
+        import http
+        from mcp_cli.apps.bridge import AppBridge
+
+        host, info = self._make_host_and_app_info()
+        bridge = AppBridge(info, host.tool_manager)
+
+        captured_process_request = None
+
+        async def capture_serve(handler, host_addr, port, process_request=None):
+            nonlocal captured_process_request
+            captured_process_request = process_request
+            return MagicMock()
+
+        with patch("mcp_cli.apps.host.ws_serve", side_effect=capture_serve):
+            await host._start_server(info, bridge)
+
+        fake_conn = MagicMock()
+        fake_req = MagicMock()
+        fake_req.path = "/ws"
+        fake_req.headers = {"Origin": "https://evil-attacker.example"}
+
+        response = captured_process_request(fake_conn, fake_req)
+        assert response is not None
+        assert response.status_code == http.HTTPStatus.FORBIDDEN
+
+    async def test_process_request_ws_rejects_missing_origin(self):
+        """The process_request closure returns 403 for '/ws' with no Origin header."""
+        from unittest.mock import MagicMock, patch
+        import http
+        from mcp_cli.apps.bridge import AppBridge
+
+        host, info = self._make_host_and_app_info()
+        bridge = AppBridge(info, host.tool_manager)
+
+        captured_process_request = None
+
+        async def capture_serve(handler, host_addr, port, process_request=None):
+            nonlocal captured_process_request
+            captured_process_request = process_request
+            return MagicMock()
+
+        with patch("mcp_cli.apps.host.ws_serve", side_effect=capture_serve):
+            await host._start_server(info, bridge)
+
+        fake_conn = MagicMock()
+        fake_req = MagicMock()
+        fake_req.path = "/ws"
+        fake_req.headers = {}
+
+        response = captured_process_request(fake_conn, fake_req)
+        assert response is not None
+        assert response.status_code == http.HTTPStatus.FORBIDDEN
+
+    async def test_process_request_ws_rejects_wrong_port(self):
+        """A matching host/scheme but wrong port in Origin must still be rejected."""
+        from unittest.mock import MagicMock, patch
+        import http
+        from mcp_cli.apps.bridge import AppBridge
+
+        host, info = self._make_host_and_app_info()
+        bridge = AppBridge(info, host.tool_manager)
+
+        captured_process_request = None
+
+        async def capture_serve(handler, host_addr, port, process_request=None):
+            nonlocal captured_process_request
+            captured_process_request = process_request
+            return MagicMock()
+
+        with patch("mcp_cli.apps.host.ws_serve", side_effect=capture_serve):
+            await host._start_server(info, bridge)
+
+        fake_conn = MagicMock()
+        fake_req = MagicMock()
+        fake_req.path = "/ws"
+        fake_req.headers = {"Origin": f"http://localhost:{info.port + 1}"}
+
+        response = captured_process_request(fake_conn, fake_req)
+        assert response is not None
+        assert response.status_code == http.HTTPStatus.FORBIDDEN
+
+    async def test_process_request_ws_accepts_127_0_0_1_origin(self):
+        """127.0.0.1 is an accepted loopback-equivalent origin host."""
+        from unittest.mock import MagicMock, patch
+        from mcp_cli.apps.bridge import AppBridge
+
+        host, info = self._make_host_and_app_info()
+        bridge = AppBridge(info, host.tool_manager)
+
+        captured_process_request = None
+
+        async def capture_serve(handler, host_addr, port, process_request=None):
+            nonlocal captured_process_request
+            captured_process_request = process_request
+            return MagicMock()
+
+        with patch("mcp_cli.apps.host.ws_serve", side_effect=capture_serve):
+            await host._start_server(info, bridge)
+
+        fake_conn = MagicMock()
+        fake_req = MagicMock()
+        fake_req.path = "/ws"
+        fake_req.headers = {"Origin": f"http://127.0.0.1:{info.port}"}
 
         response = captured_process_request(fake_conn, fake_req)
         assert response is None
@@ -1451,3 +1562,44 @@ class TestLaunchAppBrowserControl:
 
         assert len(browser_calls) == 1
         assert "9999" in browser_calls[0]
+
+
+# ── _is_allowed_origin ──────────────────────────────────────────────────────
+
+
+class TestIsAllowedOrigin:
+    """Unit tests for the WebSocket Origin allow-list check."""
+
+    def test_matching_localhost_origin(self):
+        assert _is_allowed_origin("http://localhost:9470", 9470) is True
+
+    def test_matching_127_0_0_1_origin(self):
+        assert _is_allowed_origin("http://127.0.0.1:9470", 9470) is True
+
+    def test_wrong_port_rejected(self):
+        assert _is_allowed_origin("http://localhost:9471", 9470) is False
+
+    def test_foreign_host_rejected(self):
+        assert _is_allowed_origin("https://evil-attacker.example", 9470) is False
+
+    def test_https_scheme_rejected(self):
+        # The host page is only ever served over http://, never https://.
+        assert _is_allowed_origin("https://localhost:9470", 9470) is False
+
+    def test_none_origin_rejected(self):
+        assert _is_allowed_origin(None, 9470) is False
+
+    def test_empty_string_origin_rejected(self):
+        assert _is_allowed_origin("", 9470) is False
+
+    def test_null_origin_rejected(self):
+        # Browsers send the literal string "null" for opaque origins
+        # (sandboxed iframes, data: URLs, file:// pages).
+        assert _is_allowed_origin("null", 9470) is False
+
+    def test_subdomain_impersonation_rejected(self):
+        # "localhost.evil.example" must not be treated as the loopback host.
+        assert _is_allowed_origin("http://localhost.evil.example:9470", 9470) is False
+
+    def test_malformed_origin_rejected(self):
+        assert _is_allowed_origin("not a url at all", 9470) is False

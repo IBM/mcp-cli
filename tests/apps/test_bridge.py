@@ -313,6 +313,112 @@ class TestHandleMessage:
         assert bridge.app_info.state == AppState.CLOSED
 
 
+class TestToolPermissionEnforcement:
+    """The resource's declared _meta.ui.permissions.tools scope must be honored."""
+
+    def _make_bridge_with_permissions(self, permissions):
+        tm = FakeToolManager()
+        info = AppInfo(
+            tool_name="test-tool",
+            resource_uri="ui://test-tool/app.html",
+            server_name="test-server",
+            port=9470,
+            permissions=permissions,
+        )
+        bridge = AppBridge(info, tm)
+        return bridge, tm
+
+    @pytest.mark.asyncio
+    async def test_no_permissions_declared_allows_any_tool(self):
+        """A resource that declares no permissions imposes no restriction."""
+        bridge, tm = self._make_bridge_with_permissions(None)
+        msg = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "any-tool", "arguments": {}},
+            }
+        )
+        resp = await bridge.handle_message(msg)
+        parsed = json.loads(resp)
+        assert "result" in parsed
+        assert tm.executed_tools == [("any-tool", {}, "test-server")]
+
+    @pytest.mark.asyncio
+    async def test_permissions_without_tools_key_allows_any_tool(self):
+        """A permissions dict that doesn't declare a tools scope isn't restrictive."""
+        bridge, tm = self._make_bridge_with_permissions({"clipboard": True})
+        msg = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "any-tool", "arguments": {}},
+            }
+        )
+        resp = await bridge.handle_message(msg)
+        parsed = json.loads(resp)
+        assert "result" in parsed
+        assert tm.executed_tools == [("any-tool", {}, "test-server")]
+
+    @pytest.mark.asyncio
+    async def test_listed_tool_permitted(self):
+        bridge, tm = self._make_bridge_with_permissions(
+            {"tools": ["refresh_dashboard"]}
+        )
+        msg = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "refresh_dashboard", "arguments": {}},
+            }
+        )
+        resp = await bridge.handle_message(msg)
+        parsed = json.loads(resp)
+        assert "result" in parsed
+        assert tm.executed_tools == [("refresh_dashboard", {}, "test-server")]
+
+    @pytest.mark.asyncio
+    async def test_unlisted_tool_rejected(self):
+        """A tool outside the declared scope must be rejected without calling execute_tool."""
+        bridge, tm = self._make_bridge_with_permissions(
+            {"tools": ["refresh_dashboard"]}
+        )
+        msg = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "read_local_secret_file", "arguments": {}},
+            }
+        )
+        resp = await bridge.handle_message(msg)
+        parsed = json.loads(resp)
+        assert "error" in parsed
+        assert parsed["error"]["code"] == -32603
+        assert "not permitted" in parsed["error"]["message"].lower()
+        assert tm.executed_tools == []
+
+    @pytest.mark.asyncio
+    async def test_empty_tools_list_rejects_everything(self):
+        bridge, tm = self._make_bridge_with_permissions({"tools": []})
+        msg = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "any-tool", "arguments": {}},
+            }
+        )
+        resp = await bridge.handle_message(msg)
+        parsed = json.loads(resp)
+        assert "error" in parsed
+        assert parsed["error"]["code"] == -32603
+        assert tm.executed_tools == []
+
+
 class TestWebSocketLifecycle:
     def test_set_ws_resets_state(self):
         bridge, _ = _make_bridge()

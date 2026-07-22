@@ -146,6 +146,24 @@ class AppBridge:
                 }
             )
 
+        if not self._is_tool_permitted(tool_name):
+            logger.warning(
+                "App %s attempted to call tool %r outside its declared "
+                "permission scope",
+                self.app_info.tool_name,
+                tool_name,
+            )
+            return json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Tool not permitted: {tool_name!r}",
+                    },
+                }
+            )
+
         logger.debug(
             "App %s calling tool %s with %s",
             self.app_info.tool_name,
@@ -209,6 +227,25 @@ class AppBridge:
                     "error": {"code": -32000, "message": str(e)},
                 }
             )
+
+    def _is_tool_permitted(self, tool_name: str) -> bool:
+        """Check *tool_name* against the resource's declared permission scope.
+
+        ``self.app_info.permissions`` comes from the resource's own
+        ``_meta.ui.permissions`` — a scope the *server* declared, not
+        something mcp-cli invents. When a resource declares a ``tools``
+        allow-list, only those tools may be invoked via this bridge. A
+        resource that declares no permissions (or a permissions dict with
+        no ``tools`` key) hasn't opted into scoping, so nothing here
+        restricts it beyond the existing tool-name syntax check.
+        """
+        permissions = self.app_info.permissions
+        if not permissions:
+            return True
+        allowed_tools = permissions.get("tools")
+        if not isinstance(allowed_tools, list):
+            return True
+        return tool_name in allowed_tools
 
     # ------------------------------------------------------------------ #
     #  Handler: resources/read                                            #
