@@ -27,8 +27,15 @@ async def tool_manager_sqlite(tmp_path):
         initialization_timeout=30.0,
     )
     ok = await tm.initialize()
-    if not ok:
-        pytest.skip("Could not initialize sqlite server (not available)")
+    # ToolManager.initialize() can report success even when the external server
+    # failed to start (e.g. `uvx mcp-server-sqlite` is unavailable or resolves a
+    # version incompatible with the installed MCP SDK), leaving zero tools
+    # discovered. Skip rather than fail so a broken/missing external server can
+    # never turn a hermetic run red.
+    tools = await tm.get_unique_tools() if ok else []
+    if not ok or not tools:
+        await tm.close()
+        pytest.skip("sqlite MCP server unavailable (no tools discovered)")
     try:
         yield tm
     finally:

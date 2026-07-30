@@ -75,6 +75,10 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Integration tests spin up real external MCP servers (e.g. `uvx
+# mcp-server-sqlite`) and are deselected by default so the standard test run
+# stays hermetic and green. Run them explicitly with `pytest -m integration`.
+addopts = "-m 'not integration'"
 markers = [
     "integration: end-to-end tests requiring external MCP servers",
 ]
