@@ -10,7 +10,7 @@ from chuk_tool_processor import ToolInfo as RegistryToolInfo
 
 from mcp_cli.tools.filter import DisabledReason
 from mcp_cli.tools.manager import ToolManager
-from mcp_cli.tools.models import ToolInfo
+from mcp_cli.tools.models import PromptInfo, ResourceInfo, ToolInfo
 
 
 class DummyMeta:
@@ -701,87 +701,136 @@ class TestToolManagerServerInfo:
 
         assert result == []
 
-    def test_list_resources_no_stream_manager(self):
-        """Test list_resources without stream manager."""
+    async def test_list_resources_no_stream_manager(self):
+        """list_resources returns [] when there is no stream manager."""
         tm = ToolManager(config_file="test.json", servers=[])
         tm.stream_manager = None
 
-        result = tm.list_resources()
+        result = await tm.list_resources()
 
         assert result == []
 
-    def test_list_resources_with_method(self):
-        """Test list_resources with stream manager that has method."""
+    async def test_list_resources_with_method(self):
+        """list_resources awaits the stream manager and returns ResourceInfo objects."""
         tm = ToolManager(config_file="test.json", servers=[])
         mock_sm = MagicMock()
-        mock_sm.list_resources.return_value = ["resource1"]
+        mock_sm.list_resources = AsyncMock(
+            return_value=[
+                {"uri": "file:///a.txt", "name": "a.txt", "mimeType": "text/plain"}
+            ]
+        )
         tm.stream_manager = mock_sm
 
-        result = tm.list_resources()
+        result = await tm.list_resources()
 
-        assert result == ["resource1"]
+        assert all(isinstance(r, ResourceInfo) for r in result)
+        assert result[0].name == "a.txt"
+        # uri -> id and mimeType -> type are normalized onto the canonical fields,
+        # while the original keys remain available in extra.
+        assert result[0].id == "file:///a.txt"
+        assert result[0].type == "text/plain"
+        assert result[0].extra["uri"] == "file:///a.txt"
+        assert result[0].extra["mimeType"] == "text/plain"
 
-    def test_list_resources_no_method(self):
-        """Test list_resources without method."""
+    async def test_list_resources_no_method(self):
+        """list_resources returns [] when the stream manager lacks the method."""
         tm = ToolManager(config_file="test.json", servers=[])
-        mock_sm = MagicMock(spec=[])
-        tm.stream_manager = mock_sm
+        tm.stream_manager = MagicMock(spec=[])
 
-        result = tm.list_resources()
+        result = await tm.list_resources()
 
         assert result == []
 
-    def test_list_resources_exception(self):
-        """Test list_resources handles exceptions."""
+    async def test_list_resources_exception(self):
+        """list_resources swallows stream-manager errors and returns []."""
         tm = ToolManager(config_file="test.json", servers=[])
         mock_sm = MagicMock()
-        mock_sm.list_resources.side_effect = RuntimeError("error")
+        mock_sm.list_resources = AsyncMock(side_effect=RuntimeError("error"))
         tm.stream_manager = mock_sm
 
-        result = tm.list_resources()
+        result = await tm.list_resources()
 
         assert result == []
 
-    def test_list_prompts_no_stream_manager(self):
-        """Test list_prompts without stream manager."""
+    async def test_list_prompts_no_stream_manager(self):
+        """list_prompts returns [] when there is no stream manager."""
         tm = ToolManager(config_file="test.json", servers=[])
         tm.stream_manager = None
 
-        result = tm.list_prompts()
+        result = await tm.list_prompts()
 
         assert result == []
 
-    def test_list_prompts_with_method(self):
-        """Test list_prompts with stream manager that has method."""
+    async def test_list_prompts_with_method(self):
+        """list_prompts awaits the stream manager and returns PromptInfo objects."""
         tm = ToolManager(config_file="test.json", servers=[])
         mock_sm = MagicMock()
-        mock_sm.list_prompts.return_value = ["prompt1"]
+        mock_sm.list_prompts = AsyncMock(
+            return_value=[
+                {
+                    "name": "greet",
+                    "description": "Greet someone",
+                    "arguments": [{"name": "who"}],
+                }
+            ]
+        )
         tm.stream_manager = mock_sm
 
-        result = tm.list_prompts()
+        result = await tm.list_prompts()
 
-        assert result == ["prompt1"]
+        assert all(isinstance(p, PromptInfo) for p in result)
+        assert result[0].name == "greet"
+        assert result[0].description == "Greet someone"
+        assert result[0].arguments == [{"name": "who"}]
 
-    def test_list_prompts_no_method(self):
-        """Test list_prompts without method."""
+    async def test_list_prompts_no_method(self):
+        """list_prompts returns [] when the stream manager lacks the method."""
         tm = ToolManager(config_file="test.json", servers=[])
-        mock_sm = MagicMock(spec=[])
-        tm.stream_manager = mock_sm
+        tm.stream_manager = MagicMock(spec=[])
 
-        result = tm.list_prompts()
+        result = await tm.list_prompts()
 
         assert result == []
 
-    def test_list_prompts_exception(self):
-        """Test list_prompts handles exceptions."""
+    async def test_list_prompts_exception(self):
+        """list_prompts swallows stream-manager errors and returns []."""
         tm = ToolManager(config_file="test.json", servers=[])
         mock_sm = MagicMock()
-        mock_sm.list_prompts.side_effect = RuntimeError("error")
+        mock_sm.list_prompts = AsyncMock(side_effect=RuntimeError("error"))
         tm.stream_manager = mock_sm
 
-        result = tm.list_prompts()
+        result = await tm.list_prompts()
 
         assert result == []
+
+    async def test_get_prompt_no_stream_manager(self):
+        """get_prompt returns {} when there is no stream manager."""
+        tm = ToolManager(config_file="test.json", servers=[])
+        tm.stream_manager = None
+
+        assert await tm.get_prompt("p") == {}
+
+    async def test_get_prompt_with_method(self):
+        """get_prompt awaits the stream manager and returns its dict result."""
+        tm = ToolManager(config_file="test.json", servers=[])
+        mock_sm = MagicMock()
+        payload = {"messages": [{"role": "user", "content": {"text": "hi"}}]}
+        mock_sm.get_prompt = AsyncMock(return_value=payload)
+        tm.stream_manager = mock_sm
+
+        result = await tm.get_prompt("greet", {"who": "world"})
+
+        assert result == payload
+        mock_sm.get_prompt.assert_awaited_once_with("greet", {"who": "world"}, None)
+
+    async def test_get_prompt_exception(self):
+        """get_prompt swallows stream-manager errors and returns {}."""
+        tm = ToolManager(config_file="test.json", servers=[])
+        mock_sm = MagicMock()
+        mock_sm.get_prompt = AsyncMock(side_effect=RuntimeError("error"))
+        tm.stream_manager = mock_sm
+
+        assert await tm.get_prompt("p") == {}
 
 
 class TestToolManagerGetAllToolsErrors:

@@ -1201,12 +1201,17 @@ direct_registered.append("servers")
 
 
 # Resources command
-@app.command("resources", help="List available resources")
+@app.command("resources", help="List resources, or read one with --read <uri>")
 def resources_command(
     config_file: str = typer.Option(
         "server_config.json", help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
+    read: str | None = typer.Option(
+        None,
+        "--read",
+        help="Read and print the contents of the given resource URI",
+    ),
     provider: str = typer.Option("openai", help="LLM provider name"),
     model: str | None = typer.Option(None, help="Model name"),
     disable_filesystem: bool = typer.Option(False, help="Disable filesystem access"),
@@ -1217,7 +1222,7 @@ def resources_command(
     log_level: str = typer.Option("WARNING", "--log-level", help="Set log level"),
     theme: str = typer.Option("default", "--theme", help="UI theme"),
 ) -> None:
-    """Show all recorded resources."""
+    """Show all recorded resources, or read one with --read <uri>."""
     # Configure logging and theme for this command
     _setup_command_logging(quiet, verbose, log_level, theme)
 
@@ -1229,7 +1234,7 @@ def resources_command(
     from mcp_cli.adapters.cli import cli_execute
 
     async def _resources_wrapper(**params):
-        return await cli_execute("resources")
+        return await cli_execute("resources", read=read)
 
     run_command_sync(
         _resources_wrapper,
@@ -1243,12 +1248,17 @@ direct_registered.append("resources")
 
 
 # Prompts command
-@app.command("prompts", help="List available prompts")
+@app.command("prompts", help="List prompts, or fetch one with --get <name>")
 def prompts_command(
     config_file: str = typer.Option(
         "server_config.json", help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
+    get: str | None = typer.Option(
+        None,
+        "--get",
+        help="Fetch and print a specific prompt by name",
+    ),
     provider: str = typer.Option("openai", help="LLM provider name"),
     model: str | None = typer.Option(None, help="Model name"),
     disable_filesystem: bool = typer.Option(False, help="Disable filesystem access"),
@@ -1259,7 +1269,7 @@ def prompts_command(
     log_level: str = typer.Option("WARNING", "--log-level", help="Set log level"),
     theme: str = typer.Option("default", "--theme", help="UI theme"),
 ) -> None:
-    """Show all prompt templates."""
+    """Show all prompt templates, or fetch one with --get <name>."""
     # Configure logging and theme for this command
     _setup_command_logging(quiet, verbose, log_level, theme)
 
@@ -1271,7 +1281,7 @@ def prompts_command(
     from mcp_cli.adapters.cli import cli_execute
 
     async def _prompts_wrapper(**params):
-        return await cli_execute("prompts")
+        return await cli_execute("prompts", get=get)
 
     run_command_sync(
         _prompts_wrapper,

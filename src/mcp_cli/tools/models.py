@@ -468,9 +468,59 @@ class ResourceInfo(BaseModel):
         in ``extra["value"]`` so it is never lost.
         """
         if isinstance(raw, dict):
-            known = {k: raw.get(k) for k in ("id", "name", "type")}
-            extra = {k: v for k, v in raw.items() if k not in known}
+            # MCP resources are keyed by ``uri`` and typed by ``mimeType``; map
+            # those onto the canonical id/type fields so the UI doesn't need to
+            # know the wire shape. The original keys are still kept in ``extra``.
+            known = {
+                "id": raw.get("id") or raw.get("uri"),
+                "name": raw.get("name"),
+                "type": raw.get("type") or raw.get("mimeType"),
+            }
+            extra = {k: v for k, v in raw.items() if k not in ("id", "name", "type")}
             return cls(**known, extra=extra)
+        # primitive - wrap it
+        return cls(extra={"value": raw})
+
+
+class PromptInfo(BaseModel):
+    """
+    Canonical representation of *one* prompt entry as returned by
+    ``prompts.list``.
+
+    Mirrors :class:`ResourceInfo`: the common fields used in the UI are
+    normalised and **all additional keys** are preserved inside ``extra``.
+    """
+
+    # Common attributes we frequently need in the UI
+    name: str | None = None
+    description: str | None = None
+    arguments: list[Any] = Field(default_factory=list)
+
+    # Anything else goes here …
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"frozen": False, "arbitrary_types_allowed": True}
+
+    # ------------------------------------------------------------------ #
+    # Factory helpers
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def from_raw(cls, raw: Any) -> "PromptInfo":
+        """
+        Convert a raw list item (dict | str | …) into a PromptInfo.
+
+        If *raw* is not a mapping we treat it as an opaque scalar and store it
+        in ``extra["value"]`` so it is never lost.
+        """
+        if isinstance(raw, dict):
+            known = ("name", "description", "arguments")
+            extra = {k: v for k, v in raw.items() if k not in known}
+            return cls(
+                name=raw.get("name"),
+                description=raw.get("description"),
+                arguments=raw.get("arguments") or [],
+                extra=extra,
+            )
         # primitive - wrap it
         return cls(extra={"value": raw})
 

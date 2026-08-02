@@ -13,6 +13,7 @@ from mcp_cli.tools.models import (
     ExperimentalCapabilities,
     FunctionDefinition,
     LLMToolDefinition,
+    PromptInfo,
     ResourceInfo,
     ServerCapabilities,
     ServerInfo,
@@ -324,6 +325,26 @@ class TestResourceInfo:
                 {"id": "i1", "name": "n1", "type": "t1", "extra": {"foo": 42}},
             ),
             ({}, {"id": None, "name": None, "type": None, "extra": {}}),
+            # MCP wire shape: uri -> id, mimeType -> type (originals kept in extra)
+            (
+                {"uri": "debug://x", "name": "x", "mimeType": "text/plain"},
+                {
+                    "id": "debug://x",
+                    "name": "x",
+                    "type": "text/plain",
+                    "extra": {"uri": "debug://x", "mimeType": "text/plain"},
+                },
+            ),
+            # Explicit id/type win over uri/mimeType
+            (
+                {"id": "i", "uri": "u", "type": "t", "mimeType": "m", "name": "n"},
+                {
+                    "id": "i",
+                    "name": "n",
+                    "type": "t",
+                    "extra": {"uri": "u", "mimeType": "m"},
+                },
+            ),
         ],
     )
     def test_resourceinfo_from_raw_dict(self, raw, expected):
@@ -356,6 +377,40 @@ class TestResourceInfo:
         assert ri.type == "file"
         assert ri.extra["size"] == 1024
         assert ri.extra["mime"] == "text/plain"
+
+
+class TestPromptInfo:
+    """Test PromptInfo Pydantic model."""
+
+    def test_promptinfo_from_raw_dict(self):
+        """from_raw normalizes the common fields and preserves the rest in extra."""
+        pi = PromptInfo.from_raw(
+            {
+                "name": "greet",
+                "description": "Greet someone",
+                "arguments": [{"name": "who", "required": True}],
+                "title": "Greeter",
+            }
+        )
+        assert pi.name == "greet"
+        assert pi.description == "Greet someone"
+        assert pi.arguments == [{"name": "who", "required": True}]
+        assert pi.extra == {"title": "Greeter"}
+
+    def test_promptinfo_from_raw_defaults_arguments(self):
+        """Missing arguments default to an empty list (never None)."""
+        pi = PromptInfo.from_raw({"name": "p"})
+        assert pi.name == "p"
+        assert pi.description is None
+        assert pi.arguments == []
+
+    @pytest.mark.parametrize("primitive", ["a string", 7, None])
+    def test_promptinfo_from_raw_primitive(self, primitive):
+        """Primitives are wrapped under extra['value']."""
+        pi = PromptInfo.from_raw(primitive)
+        assert pi.name is None and pi.description is None
+        assert pi.arguments == []
+        assert pi.extra == {"value": primitive}
 
 
 # ----------------------------------------------------------------------------
