@@ -121,29 +121,42 @@ Examples:
                     output="No servers available to ping.",
                 )
 
-            # Ping each server
+            # Actually ping servers via transport-level health check.
+            # This works for all transport types (stdio, SSE, HTTP).
+            health = await tool_manager.check_server_health()
+
             output.info("Pinging servers...")
             success = True
 
-            for server in servers:
+            for idx, server in enumerate(servers):
                 # Skip if filtering by targets and this server doesn't match
                 if (
                     targets
                     and server.name not in targets
-                    and str(servers.index(server)) not in targets
+                    and str(idx) not in targets
                 ):
                     continue
 
                 try:
-                    # Try to ping the server (check if it's connected)
-                    if server.connected:
-                        output.success(f"✓ {server.name}: Connected")
+                    # Use live health check result from transport.send_ping()
+                    server_health = health.get(server.name, {})
+                    ping_ok = server_health.get("ping_success", False)
+
+                    if ping_ok:
+                        output.success(f"✓ {server.name}: Online")
                     else:
-                        output.error(f"✗ {server.name}: Disconnected")
+                        status = server_health.get("status", "unreachable")
+                        output.error(f"✗ {server.name}: {status}")
                         success = False
                 except Exception as e:
                     output.error(f"✗ {server.name}: Error - {str(e)}")
                     success = False
+
+            online = sum(
+                1 for s in servers
+                if health.get(s.name, {}).get("ping_success", False)
+            )
+            output.info(f"{online}/{len(servers)} servers online")
 
             return CommandResult(success=success)
 

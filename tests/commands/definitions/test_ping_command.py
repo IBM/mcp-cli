@@ -1,7 +1,7 @@
 """Tests for the ping command."""
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, AsyncMock, patch, PropertyMock
 from mcp_cli.commands.servers.ping import PingCommand
 
 
@@ -33,7 +33,6 @@ class TestPingCommand:
     async def test_execute_all_servers(self, command):
         """Test pinging all servers."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_tm = Mock()
         mock_server = ServerInfo(
@@ -45,6 +44,9 @@ class TestPingCommand:
             namespace="test",
         )
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "test-server": {"status": "healthy", "ping_success": True},
+        })
 
         with patch("chuk_term.ui.output"):
             result = await command.execute(tool_manager=mock_tm)
@@ -54,7 +56,6 @@ class TestPingCommand:
     async def test_execute_specific_server(self, command):
         """Test pinging a specific server."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_tm = Mock()
         mock_server = ServerInfo(
@@ -66,6 +67,9 @@ class TestPingCommand:
             namespace="test",
         )
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "test-server": {"status": "healthy", "ping_success": True},
+        })
 
         with patch("chuk_term.ui.output"):
             result = await command.execute(tool_manager=mock_tm, server_index=0)
@@ -81,9 +85,8 @@ class TestPingCommand:
 
     @pytest.mark.asyncio
     async def test_execute_failed_ping(self, command):
-        """Test when server is disconnected."""
+        """Test when server ping fails (transport-level)."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_tm = Mock()
         mock_server = ServerInfo(
@@ -95,6 +98,9 @@ class TestPingCommand:
             namespace="test",
         )
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "test-server": {"status": "unhealthy", "ping_success": False},
+        })
 
         with patch("chuk_term.ui.output"):
             result = await command.execute(tool_manager=mock_tm)
@@ -103,8 +109,6 @@ class TestPingCommand:
     @pytest.mark.asyncio
     async def test_execute_error_handling(self, command):
         """Test error handling during ping."""
-        from unittest.mock import AsyncMock
-
         mock_tm = Mock()
         mock_tm.get_server_info = AsyncMock(side_effect=Exception("Network error"))
 
@@ -130,7 +134,6 @@ class TestPingCommand:
     async def test_execute_with_args_list(self, command):
         """Test executing with args as list."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_tm = Mock()
         mock_server1 = ServerInfo(
@@ -150,6 +153,10 @@ class TestPingCommand:
             namespace="test",
         )
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server1, mock_server2])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "server1": {"status": "healthy", "ping_success": True},
+            "server2": {"status": "healthy", "ping_success": True},
+        })
 
         with patch("chuk_term.ui.output"):
             # Pass args as a list
@@ -162,7 +169,6 @@ class TestPingCommand:
     async def test_execute_with_args_string(self, command):
         """Test executing with args as string."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_tm = Mock()
         mock_server = ServerInfo(
@@ -174,6 +180,9 @@ class TestPingCommand:
             namespace="test",
         )
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "server1": {"status": "healthy", "ping_success": True},
+        })
 
         with patch("chuk_term.ui.output"):
             # Pass args as a string
@@ -183,8 +192,6 @@ class TestPingCommand:
     @pytest.mark.asyncio
     async def test_execute_no_servers(self, command):
         """Test when no servers are available."""
-        from unittest.mock import AsyncMock
-
         mock_tm = Mock()
         mock_tm.get_server_info = AsyncMock(return_value=[])
 
@@ -197,7 +204,6 @@ class TestPingCommand:
     async def test_execute_with_context_success(self, command):
         """Test getting tool manager from context successfully."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_server = ServerInfo(
             id=1,
@@ -210,6 +216,9 @@ class TestPingCommand:
 
         mock_tm = Mock()
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "test-server": {"status": "healthy", "ping_success": True},
+        })
 
         mock_ctx = Mock()
         mock_ctx.tool_manager = mock_tm
@@ -224,7 +233,6 @@ class TestPingCommand:
     async def test_execute_filter_by_index(self, command):
         """Test filtering servers by index."""
         from mcp_cli.tools.models import ServerInfo
-        from unittest.mock import AsyncMock
 
         mock_tm = Mock()
         mock_server1 = ServerInfo(
@@ -244,6 +252,10 @@ class TestPingCommand:
             namespace="test",
         )
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server1, mock_server2])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "server1": {"status": "healthy", "ping_success": True},
+            "server2": {"status": "healthy", "ping_success": True},
+        })
 
         with patch("chuk_term.ui.output"):
             # Filter by index "0" - should only match first server
@@ -263,21 +275,126 @@ class TestPingCommand:
 
     @pytest.mark.asyncio
     async def test_execute_server_ping_exception(self, command):
-        """Test when accessing server.connected raises an exception."""
-        from unittest.mock import AsyncMock, PropertyMock
+        """Test when accessing health check raises an exception for a server."""
+        from mcp_cli.tools.models import ServerInfo
 
         mock_tm = Mock()
-
-        # Create a mock server that raises exception when connected is accessed
-        mock_server = Mock()
-        mock_server.name = "test-server"
-        type(mock_server).connected = PropertyMock(
-            side_effect=Exception("Connection check failed")
+        mock_server = ServerInfo(
+            id=1,
+            name="test-server",
+            status="running",
+            connected=True,
+            tool_count=5,
+            namespace="test",
         )
-
         mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        # Return empty health dict so .get() works but returns no ping_success
+        mock_tm.check_server_health = AsyncMock(return_value={})
 
         with patch("chuk_term.ui.output"):
             result = await command.execute(tool_manager=mock_tm)
-            # Should fail because the server ping raised an exception
+            # Should fail because the server didn't respond to ping
             assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_execute_sse_server_ping(self, command):
+        """Test that ping works for SSE servers (issue #203).
+
+        SSE transports don't expose raw streams, so ping must use
+        the transport-level health check instead.
+        """
+        from mcp_cli.tools.models import ServerInfo, TransportType
+
+        mock_tm = Mock()
+        mock_server = ServerInfo(
+            id=0,
+            name="sse-echo",
+            status="running",
+            connected=True,
+            tool_count=3,
+            namespace="sse-echo",
+            transport=TransportType.SSE,
+            url="http://localhost:8081/mcp",
+        )
+        mock_tm.get_server_info = AsyncMock(return_value=[mock_server])
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "sse-echo": {"status": "healthy", "ping_success": True},
+        })
+
+        with patch("chuk_term.ui.output"):
+            result = await command.execute(tool_manager=mock_tm)
+            assert result.success is True
+            # Verify check_server_health was called (not just server.connected)
+            mock_tm.check_server_health.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_mixed_transport_servers(self, command):
+        """Test ping with both stdio and SSE servers."""
+        from mcp_cli.tools.models import ServerInfo, TransportType
+
+        mock_tm = Mock()
+        stdio_server = ServerInfo(
+            id=0,
+            name="sqlite",
+            status="running",
+            connected=True,
+            tool_count=5,
+            namespace="sqlite",
+            transport=TransportType.STDIO,
+        )
+        sse_server = ServerInfo(
+            id=1,
+            name="sse-echo",
+            status="running",
+            connected=True,
+            tool_count=3,
+            namespace="sse-echo",
+            transport=TransportType.SSE,
+            url="http://localhost:8081/mcp",
+        )
+        mock_tm.get_server_info = AsyncMock(
+            return_value=[stdio_server, sse_server]
+        )
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "sqlite": {"status": "healthy", "ping_success": True},
+            "sse-echo": {"status": "healthy", "ping_success": True},
+        })
+
+        with patch("chuk_term.ui.output"):
+            result = await command.execute(tool_manager=mock_tm)
+            assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_online_count_reported(self, command):
+        """Test that online/total count is reported."""
+        from mcp_cli.tools.models import ServerInfo
+
+        mock_tm = Mock()
+        servers = [
+            ServerInfo(
+                id=i,
+                name=f"server{i}",
+                status="running",
+                connected=True,
+                tool_count=1,
+                namespace="test",
+            )
+            for i in range(3)
+        ]
+        mock_tm.get_server_info = AsyncMock(return_value=servers)
+        mock_tm.check_server_health = AsyncMock(return_value={
+            "server0": {"status": "healthy", "ping_success": True},
+            "server1": {"status": "unhealthy", "ping_success": False},
+            "server2": {"status": "healthy", "ping_success": True},
+        })
+
+        info_calls = []
+        with patch("chuk_term.ui.output") as mock_output:
+            mock_output.info = lambda msg: info_calls.append(msg)
+            mock_output.success = lambda msg: None
+            mock_output.error = lambda msg: None
+            result = await command.execute(tool_manager=mock_tm)
+            # One server failed, so overall success is False
+            assert result.success is False
+            # Check that the summary line was emitted
+            assert any("2/3 servers online" in call for call in info_calls)
