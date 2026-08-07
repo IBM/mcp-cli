@@ -19,6 +19,7 @@ from typing import Any
 
 from mcp_cli.config import (
     MCPConfig,
+    DEFAULT_CONFIG_FILENAME,
     setup_chuk_llm_environment,
     trigger_discovery_after_setup,
     detect_server_types,
@@ -29,42 +30,23 @@ logger = logging.getLogger(__name__)
 
 
 def load_config(config_file: str) -> MCPConfig | None:
-    """Load MCP server config file with fallback to bundled package config."""
+    """Load MCP server config file."""
     try:
         config_path = Path(config_file)
 
-        # Try explicit path or current directory first
         if config_path.is_file():
             config = MCPConfig.load_from_file(config_path)
             # If config loaded but has no servers and file exists, it might be invalid JSON
             # Check if the file has content but failed to parse
             if not config.servers and config_path.stat().st_size > 0:
                 try:
-                    # Try to parse as JSON to verify it's valid
                     import json
 
                     content = config_path.read_text()
                     json.loads(content)
                 except json.JSONDecodeError:
-                    # Invalid JSON - return None
                     return None
             return config
-
-        # If not found and using default name, try package bundle
-        if config_file == "server_config.json":
-            try:
-                import importlib.resources as resources
-
-                # Try Python 3.9+ API
-                if hasattr(resources, "files"):
-                    package_files = resources.files("mcp_cli")
-                    bundled_config = package_files / "server_config.json"
-                    if bundled_config.is_file():
-                        logger.info("Loading bundled server configuration")
-                        # Create a temporary Path object from the resource
-                        return MCPConfig.load_from_file(Path(str(bundled_config)))
-            except (ImportError, FileNotFoundError, AttributeError, TypeError) as e:
-                logger.debug(f"Could not load bundled config: {e}")
 
     except Exception as exc:
         logger.error("Error loading config file '%s': %s", config_file, exc)
@@ -106,7 +88,7 @@ def process_options(
     disable_filesystem: bool,
     provider: str,
     model: str | None,
-    config_file: str = "server_config.json",
+    config_file: str = DEFAULT_CONFIG_FILENAME,
     quiet: bool = False,
 ) -> tuple[list[str], list[str], dict[int, str]]:
     """
@@ -140,7 +122,7 @@ def process_options(
     cfg = load_config(config_file)
 
     if not cfg:
-        logger.warning(f"Could not load config file: {config_file}")
+        logger.info(f"Could not load config file: {config_file}")
         # Return empty configuration
         return [], user_specified, {}
 

@@ -516,51 +516,13 @@ def test_extract_server_names_with_disabled(
 
 
 class TestLoadConfigBundled:
-    """Test bundled config loading fallback."""
+    """Test config loading when file is missing (no bundled fallback)."""
 
-    def test_load_bundled_config_with_default_name(self, tmp_path, monkeypatch):
-        """Test loading bundled config when server_config.json not found locally."""
-        # Change to temp directory where server_config.json doesn't exist
+    def test_load_config_missing_returns_none(self, tmp_path, monkeypatch):
+        """Test that missing config file returns None (no bundled fallback)."""
         monkeypatch.chdir(tmp_path)
-
-        # Mock importlib.resources to simulate bundled config
-        mock_bundled_config = {
-            "mcpServers": {"BundledServer": {"command": "bundled-cmd", "args": []}}
-        }
-
-        # Create a mock resource file
-        mock_resource_file = MagicMock()
-        mock_resource_file.is_file.return_value = True
-        mock_resource_file.__str__.return_value = str(
-            tmp_path / "bundled_server_config.json"
-        )
-
-        # Create the actual file for MCPConfig.load_from_file to read
-        bundled_file = tmp_path / "bundled_server_config.json"
-        bundled_file.write_text(json.dumps(mock_bundled_config))
-        mock_resource_file.__str__.return_value = str(bundled_file)
-
-        with patch("importlib.resources.files") as mock_files:
-            mock_package = MagicMock()
-            mock_package.__truediv__ = MagicMock(return_value=mock_resource_file)
-            mock_files.return_value = mock_package
-
-            config = load_config("server_config.json")
-
-            # Should successfully load bundled config
-            assert config is not None
-            assert "BundledServer" in config.servers
-
-    def test_load_bundled_config_not_found(self, tmp_path, monkeypatch):
-        """Test when bundled config is not available."""
-        monkeypatch.chdir(tmp_path)
-
-        # Mock importlib.resources to raise error (no bundled config)
-        with patch(
-            "importlib.resources.files", side_effect=FileNotFoundError("No bundled")
-        ):
-            config = load_config("server_config.json")
-            assert config is None
+        config = load_config("server_config.json")
+        assert config is None
 
     def test_load_config_with_empty_but_valid_json(self, tmp_path):
         """Test loading config with empty but valid JSON."""
@@ -721,7 +683,7 @@ class TestProcessOptionsEdgeCases:
 
         monkeypatch.delenv("LLM_PROVIDER", raising=False)
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG, logger="mcp_cli.config.cli_options"):
             servers_list, specified, server_names = process_options(
                 server="Server1",
                 disable_filesystem=True,
@@ -735,7 +697,6 @@ class TestProcessOptionsEdgeCases:
         assert specified == ["Server1"]
         assert server_names == {}
 
-        # Should log warning
         assert any(
             "Could not load config file" in record.message for record in caplog.records
         )

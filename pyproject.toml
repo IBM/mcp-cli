@@ -62,7 +62,7 @@ where = ["src"]
 include = ["mcp_cli*"]
 
 [tool.setuptools.package-data]
-mcp_cli = ["server_config.json", "dashboard/static/**/*"]
+mcp_cli = ["server_config.example.json", "dashboard/static/**/*"]
 [dependency-groups]
 dev = [
   "colorama>=0.4.6",

@@ -30,7 +30,7 @@ from chuk_term.ui import (
     restore_terminal,
 )
 from chuk_term.ui.theme import set_theme
-from mcp_cli.config import process_options
+from mcp_cli.config import process_options, APP_VERSION, DEFAULT_CONFIG_FILENAME, DEFAULT_PROVIDER, DEFAULT_MODEL
 from mcp_cli.context import initialize_context
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -56,13 +56,28 @@ app = typer.Typer(add_completion=False)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Version callback
+# ──────────────────────────────────────────────────────────────────────────────
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"mcp-cli {APP_VERSION}")
+        raise typer.Exit()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Default callback that handles no-subcommand case
 # ──────────────────────────────────────────────────────────────────────────────
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
+    version: bool = typer.Option(
+        None, "--version", "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    ),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str | None = typer.Option(None, help="LLM provider name"),
@@ -335,11 +350,11 @@ def main_callback(
             f"Using current provider with specified model: {effective_provider}/{model}"
         )
     else:
-        # Neither specified, use active configuration
-        effective_provider = model_manager.get_active_provider()
-        effective_model = model_manager.get_active_model()
+        # Neither specified — use declared project defaults
+        effective_provider = DEFAULT_PROVIDER
+        effective_model = DEFAULT_MODEL
         logger.debug(
-            f"Using active configuration: {effective_provider}/{effective_model}"
+            f"Using default configuration: {effective_provider}/{effective_model}"
         )
 
     servers, _, server_names = process_options(
@@ -469,7 +484,7 @@ def main_callback(
 )
 def _chat_command(
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str | None = typer.Option(None, help="LLM provider name"),
@@ -648,8 +663,9 @@ def _chat_command(
         effective_provider = model_manager.get_active_provider()
         effective_model = model
     else:
-        effective_provider = model_manager.get_active_provider()
-        effective_model = model_manager.get_active_model()
+        # Neither specified — use declared project defaults
+        effective_provider = DEFAULT_PROVIDER
+        effective_model = DEFAULT_MODEL
 
     servers, _, server_names = process_options(
         server,
@@ -735,7 +751,7 @@ def _chat_command(
 @app.command("interactive", help="Start interactive command mode.")
 def _interactive_command(
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str | None = typer.Option(None, help="LLM provider name"),
@@ -821,11 +837,11 @@ def _interactive_command(
             f"Using current provider with specified model: {effective_provider}/{model}"
         )
     else:
-        # Neither specified, use active configuration
-        effective_provider = model_manager.get_active_provider()
-        effective_model = model_manager.get_active_model()
+        # Neither specified — use declared project defaults
+        effective_provider = DEFAULT_PROVIDER
+        effective_model = DEFAULT_MODEL
         logger.debug(
-            f"Using active configuration: {effective_provider}/{effective_model}"
+            f"Using default configuration: {effective_provider}/{effective_model}"
         )
 
     servers, _, server_names = process_options(
@@ -923,7 +939,7 @@ def provider_command(
         None, "--model", help="Model name (for switch commands)"
     ),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     disable_filesystem: bool = typer.Option(False, help="Disable filesystem access"),
@@ -1004,7 +1020,7 @@ def providers_command(
         None, "--model", help="Model name (for switch commands)"
     ),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     disable_filesystem: bool = typer.Option(False, help="Disable filesystem access"),
@@ -1060,7 +1076,7 @@ def tools_command(
     all: bool = typer.Option(False, "--all", help="Show detailed tool information"),
     raw: bool = typer.Option(False, "--raw", help="Show raw JSON definitions"),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str = typer.Option("openai", help="LLM provider name"),
@@ -1137,7 +1153,7 @@ def servers_command(
         "table", "--format", "-f", help="Output format: table, tree, or json"
     ),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str = typer.Option("openai", help="LLM provider name"),
@@ -1204,7 +1220,7 @@ direct_registered.append("servers")
 @app.command("resources", help="List available resources")
 def resources_command(
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str = typer.Option("openai", help="LLM provider name"),
@@ -1246,7 +1262,7 @@ direct_registered.append("resources")
 @app.command("prompts", help="List available prompts")
 def prompts_command(
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str = typer.Option("openai", help="LLM provider name"),
@@ -1602,7 +1618,7 @@ def cmd_command(
         100, "--max-turns", help="Maximum conversation turns"
     ),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str | None = typer.Option(None, help="LLM provider name"),
@@ -1703,7 +1719,7 @@ def ping_command(
         None, help="Server names or indices to ping (omit for all)"
     ),
     config_file: str = typer.Option(
-        "server_config.json", help="Configuration file path"
+        DEFAULT_CONFIG_FILENAME, help="Configuration file path"
     ),
     server: str | None = typer.Option(None, help="Server to connect to"),
     provider: str = typer.Option("openai", help="LLM provider name"),
@@ -1751,14 +1767,18 @@ def ping_command(
 direct_registered.append("ping")
 
 
-# Show what we actually registered
-all_registered = registry_registered + direct_registered
-output.success("✓ MCP CLI ready")
-if all_registered:
-    output.info(f"  Available commands: {', '.join(sorted(all_registered))}")
-else:
-    output.warning("  Warning: No commands were successfully registered!")
-output.hint("  Use --help to see all options")
+# NOTE: Startup banner disabled — it runs at module-import time (before
+# Typer parses arguments), so it pollutes the output of --version, --help,
+# and every subcommand.  In chat mode it is immediately erased by
+# clear_screen().  Consider removing this block entirely.
+#
+# all_registered = registry_registered + direct_registered
+# output.success("✓ MCP CLI ready")
+# if all_registered:
+#     output.info(f"  Available commands: {', '.join(sorted(all_registered))}")
+# else:
+#     output.warning("  Warning: No commands were successfully registered!")
+# output.hint("  Use --help to see all options")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ from mcp_cli.chat.conversation import ConversationProcessor
 from mcp_cli.tools.manager import ToolManager
 from mcp_cli.context import initialize_context
 from mcp_cli.config import initialize_config
-from mcp_cli.config.defaults import DEFAULT_PROVIDER, DEFAULT_MODEL
+from mcp_cli.config.defaults import DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_CONFIG_FILENAME
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -95,7 +95,8 @@ async def handle_chat_mode(
         # Initialize configuration manager
         from pathlib import Path
 
-        initialize_config(Path("server_config.json"))
+        # Use the project-wide constant instead of a hardcoded filename
+        initialize_config(Path(DEFAULT_CONFIG_FILENAME))
 
         # Initialize global context manager for commands to work
         app_context = initialize_context(

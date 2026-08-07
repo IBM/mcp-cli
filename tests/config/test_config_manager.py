@@ -134,8 +134,8 @@ class TestMCPConfig:
         """Test MCPConfig default values."""
         config = MCPConfig()
         assert config.servers == {}
-        assert config.default_provider == "openai"
-        assert config.default_model == "gpt-4o-mini"
+        assert config.default_provider == "ollama"
+        assert config.default_model == "gpt-oss"
         assert config.theme == "default"
         assert config.verbose is True
         assert config.confirm_tools is True
@@ -767,29 +767,22 @@ class TestMCPConfigLoadFromFileTimeouts:
 
 
 class TestConfigManagerPackageFallback:
-    """Test ConfigManager package fallback behavior."""
+    """Test ConfigManager initialization behavior."""
 
     def test_initialize_without_path_no_cwd_file(self, tmp_path, monkeypatch):
         """Test initialize without path when no server_config.json in cwd."""
         monkeypatch.chdir(tmp_path)
-        # No server_config.json in tmp_path
 
         manager = ConfigManager()
         manager.reset()
 
-        # Mock the importlib.resources behavior
-        with patch("importlib.resources.files") as mock_files:
-            mock_package = MagicMock()
-            mock_config_file = MagicMock()
-            mock_config_file.is_file.return_value = False
-            mock_package.__truediv__ = MagicMock(return_value=mock_config_file)
-            mock_files.return_value = mock_package
+        config = manager.initialize()
+        # Returns empty config (no bundled fallback)
+        assert config is not None
+        assert config.servers == {}
 
-            config = manager.initialize()
-            assert config is not None
-
-    def test_initialize_with_cwd_file_priority(self, tmp_path, monkeypatch):
-        """Test that cwd config takes priority over bundled."""
+    def test_initialize_with_cwd_file(self, tmp_path, monkeypatch):
+        """Test that cwd config is loaded."""
         config_data = {"mcpServers": {"local-server": {"command": "local-cmd"}}}
         config_file = tmp_path / "server_config.json"
         config_file.write_text(json.dumps(config_data))

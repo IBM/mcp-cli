@@ -176,10 +176,10 @@ DEFAULT_AUTO_SAVE_INTERVAL = 10
 # Provider/Model Defaults
 # ================================================================
 
-DEFAULT_PROVIDER = "openai"
+DEFAULT_PROVIDER = "ollama"
 """Default LLM provider."""
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-oss"
 """Default LLM model."""
 
 

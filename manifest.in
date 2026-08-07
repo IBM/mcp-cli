@@ -1,6 +1,6 @@
 # Include documentation
 include README.md
-include server_config.json
+include src/mcp_cli/server_config.example.json
 
 # Include package files
 recursive-include src/mcp_cli *.py

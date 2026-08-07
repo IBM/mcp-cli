@@ -24,7 +24,8 @@ def _mock_server(port: int = 9120):
 
 class TestLaunchDashboard:
     @pytest.mark.asyncio
-    async def test_returns_server_router_and_port(self):
+    @patch("mcp_cli.dashboard.launcher.webbrowser.open")
+    async def test_returns_server_router_and_port(self, _mock_open):
         from mcp_cli.dashboard import launcher
 
         srv = _mock_server(9120)
@@ -36,7 +37,8 @@ class TestLaunchDashboard:
         assert port == 9120
 
     @pytest.mark.asyncio
-    async def test_returns_router(self):
+    @patch("mcp_cli.dashboard.launcher.webbrowser.open")
+    async def test_returns_router(self, _mock_open):
         from mcp_cli.dashboard import launcher
 
         srv = _mock_server(9120)
@@ -51,7 +53,7 @@ class TestLaunchDashboard:
         from mcp_cli.dashboard import launcher
 
         with patch.object(launcher, "DashboardServer", return_value=_mock_server(9120)):
-            with patch("webbrowser.open") as mock_open:
+            with patch("mcp_cli.dashboard.launcher.webbrowser.open") as mock_open:
                 await launcher.launch_dashboard(no_browser=False)
 
         mock_open.assert_called_once_with("http://localhost:9120")
@@ -61,7 +63,7 @@ class TestLaunchDashboard:
         from mcp_cli.dashboard import launcher
 
         with patch.object(launcher, "DashboardServer", return_value=_mock_server(9120)):
-            with patch("webbrowser.open") as mock_open:
+            with patch("mcp_cli.dashboard.launcher.webbrowser.open") as mock_open:
                 await launcher.launch_dashboard(no_browser=True)
 
         mock_open.assert_not_called()
@@ -71,7 +73,8 @@ class TestLaunchDashboard:
         from mcp_cli.dashboard import launcher
 
         with patch.object(launcher, "DashboardServer", return_value=_mock_server(9120)):
-            with patch("webbrowser.open", side_effect=Exception("no display")):
+            # Patch where the name is looked up, not where it's defined
+            with patch("mcp_cli.dashboard.launcher.webbrowser.open", side_effect=Exception("no display")):
                 server, router, port = await launcher.launch_dashboard(no_browser=False)
 
         assert port == 9120  # function completed successfully
@@ -82,7 +85,7 @@ class TestLaunchDashboard:
 
         srv = _mock_server(8080)
         with patch.object(launcher, "DashboardServer", return_value=srv):
-            with patch("webbrowser.open"):
+            with patch("mcp_cli.dashboard.launcher.webbrowser.open"):
                 _, _, port = await launcher.launch_dashboard(port=8080)
 
         srv.start.assert_called_once_with(8080)
@@ -94,7 +97,7 @@ class TestLaunchDashboard:
 
         srv = _mock_server(9120)
         with patch.object(launcher, "DashboardServer", return_value=srv):
-            with patch("webbrowser.open"):
+            with patch("mcp_cli.dashboard.launcher.webbrowser.open"):
                 await launcher.launch_dashboard()
 
         srv.start.assert_called_once_with(0)

@@ -2,6 +2,7 @@
 """Tests for MCP configuration loading."""
 
 import json
+import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -91,15 +92,15 @@ def test_load_config_caches_result(temp_config_file):
     assert config1 is config2
 
 
-def test_load_config_file_not_found():
-    """Test loading nonexistent config file falls back to bundled config."""
+def test_load_config_file_not_found(caplog):
+    """Test loading nonexistent config file returns empty dict."""
     loader = ConfigLoader("/nonexistent/config.json", [])
 
-    config = loader.load()
+    with caplog.at_level(logging.INFO, logger="mcp_cli.tools.config_loader"):
+        config = loader.load()
 
-    # Should fall back to bundled package config (non-empty)
-    # or return empty dict if bundled config unavailable
-    assert isinstance(config, dict)
+    assert config == {}
+    assert any("Config file not found" in r.message for r in caplog.records)
 
 
 def test_load_config_invalid_json(tmp_path):
@@ -627,15 +628,15 @@ async def test_load_async_caches_result(temp_config_file):
 
 
 @pytest.mark.asyncio
-async def test_load_async_file_not_found():
-    """Test async loading nonexistent config file falls back to bundled config."""
+async def test_load_async_file_not_found(caplog):
+    """Test async loading nonexistent config file returns empty dict."""
     loader = ConfigLoader("/nonexistent/config.json", [])
 
-    config = await loader.load_async()
+    with caplog.at_level(logging.INFO, logger="mcp_cli.tools.config_loader"):
+        config = await loader.load_async()
 
-    # Should fall back to bundled package config (non-empty)
-    # or return empty dict if bundled config unavailable
-    assert isinstance(config, dict)
+    assert config == {}
+    assert any("Config file not found" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio

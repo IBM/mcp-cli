@@ -19,7 +19,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mcp_cli.auth import OAuthConfig
-from mcp_cli.config.defaults import DEFAULT_PROVIDER, DEFAULT_MODEL
+from mcp_cli.config.defaults import DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_CONFIG_FILENAME
 from mcp_cli.tools.models import ServerInfo, TransportType
 
 # Import clean models from new config system
@@ -352,32 +352,13 @@ class ConfigManager:
 
         Priority order:
         1. Explicit config_path if provided
-        2. server_config.json in current directory (overrides package default)
-        3. server_config.json bundled in package (fallback)
+        2. server_config.json in current directory
         """
         if self._config is None:
             if config_path:
-                # Explicit path provided
                 self._config_path = Path(config_path)
             else:
-                # Check current directory first
-                cwd_config = Path("server_config.json")
-                if cwd_config.exists():
-                    self._config_path = cwd_config
-                else:
-                    # Fall back to package bundled config
-                    import importlib.resources as resources
-
-                    try:
-                        package_files = resources.files("mcp_cli")
-                        config_file = package_files / "server_config.json"
-                        if config_file.is_file():
-                            self._config_path = Path(str(config_file))
-                        else:
-                            self._config_path = cwd_config
-                    except (ImportError, FileNotFoundError, AttributeError, TypeError):
-                        # If package config doesn't exist or can't be accessed, use cwd
-                        self._config_path = cwd_config
+                self._config_path = Path(DEFAULT_CONFIG_FILENAME)
 
             self._config = MCPConfig.load_from_file(self._config_path)
         return self._config

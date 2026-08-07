@@ -121,6 +121,7 @@ def check_mcp_environment():
         print("     Create a config file with MCP servers to analyze real connections")
         print()
         print("  📝 mcp-cli uses 'server_config.json' by default. Create one of:")
+        print("     💡 Tip: cp src/mcp_cli/server_config.example.json server_config.json")
         print("     • server_config.json (in current directory)")
         print("     • ~/.config/mcp/config.json (standard MCP location)")
         print("     • mcp_config.json (alternative name)")

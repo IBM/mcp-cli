@@ -270,7 +270,7 @@ def load_runtime_config(
     """
     from pathlib import Path
 
-    path = Path(config_path or "server_config.json")
+    path = Path(config_path or DEFAULT_CONFIG_FILENAME)
     file_config = MCPConfig.load_sync(path)
     return RuntimeConfig(file_config, cli_overrides)
 
@@ -290,7 +290,7 @@ async def load_runtime_config_async(
     """
     from pathlib import Path
 
-    path = Path(config_path or "server_config.json")
+    path = Path(config_path or DEFAULT_CONFIG_FILENAME)
     file_config = await MCPConfig.load_async(path)
     return RuntimeConfig(file_config, cli_overrides)
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr, SkipValidation
 
-from mcp_cli.config.defaults import DEFAULT_PROVIDER, DEFAULT_MODEL
+from mcp_cli.config.defaults import DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_CONFIG_FILENAME
 from mcp_cli.tools.manager import ToolManager
 from mcp_cli.model_management import ModelManager
 from mcp_cli.tools.models import ServerInfo, ToolInfo, ConversationMessage
@@ -35,7 +35,7 @@ class ApplicationContext(BaseModel):
     model_manager: Annotated[ModelManager | None, SkipValidation()] = None
 
     # Configuration
-    config_path: Path = Field(default_factory=lambda: Path("server_config.json"))
+    config_path: Path = Field(default_factory=lambda: Path(DEFAULT_CONFIG_FILENAME))
     provider: str = DEFAULT_PROVIDER
     model: str = DEFAULT_MODEL
     api_base: str | None = None
@@ -90,7 +90,7 @@ class ApplicationContext(BaseModel):
         """
         context = cls(
             tool_manager=tool_manager,
-            config_path=config_path or Path("server_config.json"),
+            config_path=config_path or Path(DEFAULT_CONFIG_FILENAME),
             provider=provider or DEFAULT_PROVIDER,
             model=model or DEFAULT_MODEL,
             **kwargs,

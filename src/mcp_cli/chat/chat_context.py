@@ -241,8 +241,17 @@ class ChatContext:
     # ── Properties ────────────────────────────────────────────────────────
     @property
     def client(self) -> Any:
-        """Get current LLM client (cached automatically by ModelManager)."""
-        return self.model_manager.get_client()
+        """Get current LLM client (cached automatically by ModelManager).
+
+        Returns None if the client cannot be created (e.g. missing API key)
+        so the UI can start without crashing. The error is logged and the user
+        will see a proper message when they try to send a message.
+        """
+        try:
+            return self.model_manager.get_client()
+        except Exception as e:
+            logger.error(f"Failed to create client for {self.provider}: {e}")
+            return None
 
     @property
     def provider(self) -> str:
@@ -461,11 +470,11 @@ class ChatContext:
             await self._initialize_session()
 
             # Quick provider validation (non-blocking)
-            try:
-                _client = self.client  # noqa: F841 — fails fast if no API key
+            _client = self.client  # None if client could not be created
+            if _client is not None:
                 logger.info(f"Provider {self.provider} client created successfully")
-            except Exception as e:
-                logger.warning(f"Provider validation warning: {e}")
+            else:
+                logger.warning("Provider validation warning: client could not be created.")
                 logger.warning("Chat may fail when making API calls.")
 
             if not self.tools:
