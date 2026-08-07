@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.12.0/.schema/devbox.schema.json",
+  "packages": {
+    "python": {
+      "version": "3.11",
+      "disable_plugin": true
+    },
+    "gnumake": "4.4.1"
+  },
+  "shell": {
+    "init_hook": [
+      "python3 -m venv ~/.venv/mcp-cli",
+      "source ~/.venv/mcp-cli/bin/activate"
+    ],
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
+    }
+  },
+  "env_from": ".env"
+}
