@@ -30,7 +30,7 @@ from chuk_term.ui import (
     restore_terminal,
 )
 from chuk_term.ui.theme import set_theme
-from mcp_cli.config import process_options
+from mcp_cli.config import process_options, APP_VERSION
 from mcp_cli.context import initialize_context
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -56,11 +56,26 @@ app = typer.Typer(add_completion=False)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Version callback
+# ──────────────────────────────────────────────────────────────────────────────
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"mcp-cli {APP_VERSION}")
+        raise typer.Exit()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Default callback that handles no-subcommand case
 # ──────────────────────────────────────────────────────────────────────────────
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
+    version: bool = typer.Option(
+        None, "--version", "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    ),
     config_file: str = typer.Option(
         "server_config.json", help="Configuration file path"
     ),

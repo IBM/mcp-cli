@@ -38,5 +38,9 @@ os.environ.setdefault("CHUK_LLM_AUTO_DISCOVER", "true")
 os.environ.setdefault("CHUK_LLM_OPENAI_TOOL_COMPATIBILITY", "true")
 os.environ.setdefault("CHUK_LLM_UNIVERSAL_TOOLS", "true")
 
-__version__ = "1.0.0"
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
+try:
+    __version__ = _pkg_version("mcp-cli")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"
 __all__ = ["__version__"]
