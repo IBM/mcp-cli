@@ -1751,14 +1751,18 @@ def ping_command(
 direct_registered.append("ping")
 
 
-# Show what we actually registered
-all_registered = registry_registered + direct_registered
-output.success("✓ MCP CLI ready")
-if all_registered:
-    output.info(f"  Available commands: {', '.join(sorted(all_registered))}")
-else:
-    output.warning("  Warning: No commands were successfully registered!")
-output.hint("  Use --help to see all options")
+# NOTE: Startup banner disabled — it runs at module-import time (before
+# Typer parses arguments), so it pollutes the output of --version, --help,
+# and every subcommand.  In chat mode it is immediately erased by
+# clear_screen().  Consider removing this block entirely.
+#
+# all_registered = registry_registered + direct_registered
+# output.success("✓ MCP CLI ready")
+# if all_registered:
+#     output.info(f"  Available commands: {', '.join(sorted(all_registered))}")
+# else:
+#     output.warning("  Warning: No commands were successfully registered!")
+# output.hint("  Use --help to see all options")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
