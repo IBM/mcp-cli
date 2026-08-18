@@ -60,6 +60,14 @@ class ModelManager:
             from chuk_llm.configuration import get_config
 
             self._chuk_config = get_config()
+
+            # Register built-in gateway providers (e.g. OrcaRouter) so users
+            # can select them by name out of the box.
+            from mcp_cli.model_management.gateway_providers import (
+                register_gateway_providers,
+            )
+
+            register_gateway_providers(self._chuk_config)
             logger.debug("Loaded chuk_llm configuration")
 
             # Use configured default provider (from defaults.py)
