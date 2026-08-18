@@ -28,6 +28,7 @@ PROVIDER_ENV_VAR_MAP = {
     "mistral": "MISTRAL_API_KEY",
     "perplexity": "PERPLEXITY_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "orcarouter": "ORCAROUTER_API_KEY",
     "togetherai": "TOGETHER_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "azure_openai": "AZURE_OPENAI_API_KEY",

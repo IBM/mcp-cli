@@ -119,6 +119,7 @@ MCP CLI supports all providers and models from CHUK-LLM, including cutting-edge 
 | **Perplexity** 🌐 | Sonar models | Real-time web search with citations |
 | **IBM watsonx** 🏢 | Granite, Llama models | Enterprise compliance |
 | **Mistral AI** 🇪🇺 | Mistral Large, Medium | European, efficient models |
+| **OrcaRouter** 🐋 | openai/gpt-4o-mini, orcarouter/auto | OpenAI-compatible routing gateway — 150+ models behind one API key |
 
 ### Robust Tool System (Powered by CHUK Tool Processor v0.22+)
 - **Automatic Discovery**: Server-provided tools are automatically detected and catalogued
@@ -208,6 +209,7 @@ Comprehensive documentation is available in the `docs/` directory:
   - Azure: `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT` (for enterprise GPT-5)
   - Google: `GEMINI_API_KEY` (for Gemini models)
   - Groq: `GROQ_API_KEY` (for fast Llama models)
+  - OrcaRouter: `ORCAROUTER_API_KEY` (keys start with `sk-orca-`; 150+ models behind one endpoint)
   - Custom providers: Provider-specific configuration
 - **MCP Servers**: Server configuration file (default: `server_config.json`)
 
@@ -502,6 +504,7 @@ mcp-cli --server sqlite --provider anthropic --model claude-4-5-opus
 /provider openai                   # Switch to OpenAI (requires API key)
 /provider anthropic                # Switch to Anthropic (requires API key)
 /provider openai gpt-5             # Switch to OpenAI GPT-5
+/provider orcarouter               # Switch to OrcaRouter (requires ORCAROUTER_API_KEY)
 
 # Custom Provider Management
 /provider custom                   # List custom providers
